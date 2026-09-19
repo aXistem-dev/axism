@@ -1,0 +1,41 @@
+[project]
+name = "axism"
+version = "0.1.0"
+description = "aXism — Agent Interactive Session Manager (TUI + CLI)"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+authors = [{ name = "aXism contributors" }]
+keywords = ["ai", "sessions", "tui", "agents", "claude-code", "axism"]
+dependencies = [
+  "textual>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.8.0",
+]
+
+[project.scripts]
+axism = "axism.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+ignore = [
+  "RUF012",  # Textual BINDINGS class attrs
+  "BLE001",  # broad except for UI table refresh fallbacks
+  "SIM102",
+  "SIM103",
+]
