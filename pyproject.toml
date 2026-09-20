@@ -24,7 +24,7 @@ axism = "axism.cli:main"
 Homepage = "https://github.com/aXistem-dev/axism"
 Repository = "https://github.com/aXistem-dev/axism"
 Issues = "https://github.com/aXistem-dev/axism/issues"
-Changelog = "https://github.com/aXistem-dev/axism/releases"
+Changelog = "https://github.com/aXistem-dev/axism/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling"]

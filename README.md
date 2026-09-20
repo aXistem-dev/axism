@@ -172,12 +172,13 @@ uv build                          # dist/axism-0.1.0-*.whl and *.tar.gz
 
 ## Versioning
 
-Bump **both** when releasing:
+Bump **all** when releasing:
 
 | File | Field |
 |------|--------|
 | `pyproject.toml` | `project.version` |
 | `src/axism/__init__.py` | `__version__` |
+| `CHANGELOG.md` | new `[X.Y.Z]` section from `[Unreleased]` |
 
 ```bash
 axism --version          # installed binary

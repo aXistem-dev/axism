@@ -17,7 +17,8 @@
 4. **Stop** — `s`/`S` or `axism stop` runs ``claude stop`` (same as `/stop` while attached to a background session). Interactive sessions are not stoppable this way.
 5. **Pane-aware keys** — Space / a / d / o / s / m follow the projects vs sessions matrix; **c/C clears all marks** (projects + sessions). **d/D** deletes projects when the projects pane is focused, sessions otherwise. **m/M moves** project(s) or session(s) to another path (pick existing or type cwd). **`,`** opens Settings (provider + config dir).
 6. User-facing branding says **aXism**. Mention “Claude Code” only where the code shells out to `claude`.
-7. **Docs are current-state only** — README and similar docs describe how the project works *now*, not how it evolved. Prefer editing content in place over phrases like “was removed,” “previously,” “used to,” “as of [date],” or “no longer.” Do not create or update a CHANGELOG unless explicitly asked. Do not put agent/process meta-commentary into project files.
+7. **Docs are current-state only** — README and similar docs describe how the project works *now*, not how it evolved. Prefer editing content in place over phrases like “was removed,” “previously,” “used to,” “as of [date],” or “no longer.” Do not put agent/process meta-commentary into project files. **Exception:** keep `CHANGELOG.md` up to date on every version bump (see Versioning).
+8. **Changelog** — when bumping the version, move `[Unreleased]` notes into a new `## [X.Y.Z] — YYYY-MM-DD` section in `CHANGELOG.md` and leave a fresh empty `[Unreleased]` stub.
 
 ## Layout
 
@@ -44,7 +45,15 @@ uv tool install --force .
 
 ## Versioning & release
 
-Bump **both** `pyproject.toml` and `src/axism/__init__.py`. Tag `v*` (e.g. `v0.1.0`) to trigger `.github/workflows/release.yml`. Keep docs forge-agnostic (no hardcoded private hosts).
+Bump **all** of:
+
+| File | Field / action |
+|------|----------------|
+| `pyproject.toml` | `project.version` |
+| `src/axism/__init__.py` | `__version__` |
+| `CHANGELOG.md` | move `[Unreleased]` → `## [X.Y.Z] — YYYY-MM-DD`; leave empty `[Unreleased]` |
+
+Tag `v*` (e.g. `v0.1.0`) to trigger `.github/workflows/release.yml` (GitHub Release assets + PyPI). Keep docs forge-agnostic (no hardcoded private hosts).
 
 ## Commits
 
