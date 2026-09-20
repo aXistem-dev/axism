@@ -20,6 +20,12 @@ dev = [
 [project.scripts]
 axism = "axism.cli:main"
 
+[project.urls]
+Homepage = "https://github.com/aXistem-dev/axism"
+Repository = "https://github.com/aXistem-dev/axism"
+Issues = "https://github.com/aXistem-dev/axism/issues"
+Changelog = "https://github.com/aXistem-dev/axism/releases"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

@@ -11,6 +11,10 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: write
+      id-token: write  # Trusted Publisher (OIDC) → PyPI
     steps:
       - uses: actions/checkout@v4
 
@@ -26,7 +30,7 @@ jobs:
           uv build
           ls -la dist
 
-      - name: Upload GitHub / compatible release assets
+      - name: Upload GitHub release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -35,3 +39,9 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Creates the PyPI project on first successful upload when a
+      # pending Trusted Publisher is registered for this workflow.
+      # See: https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

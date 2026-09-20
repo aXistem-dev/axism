@@ -37,17 +37,24 @@ Works on **Linux** and **macOS**. The first backend is [Claude Code](https://cod
 
 ## Install
 
-Put `axism` on your PATH (no root required):
+```bash
+# once published to PyPI
+pipx install axism
+# or
+uv tool install axism
+```
+
+From GitHub release assets:
 
 ```bash
-# from a clone (recommended while developing)
-./scripts/install.sh
-# or
-uv tool install --force .
+uv tool install https://github.com/aXistem-dev/axism/releases/download/v0.1.0/axism-0.1.0-py3-none-any.whl
+```
 
-# alternatives
-pipx install --force .
-pip install --user --upgrade .
+From a clone (development):
+
+```bash
+./scripts/install.sh
+# or: uv tool install --force .
 ```
 
 Ensure `~/.local/bin` is on your `PATH`. Then:
@@ -55,14 +62,6 @@ Ensure `~/.local/bin` is on your `PATH`. Then:
 ```bash
 axism --version   # e.g. axism 0.1.0
 axism --help
-```
-
-From a release wheel:
-
-```bash
-uv tool install ./axism-0.1.0-py3-none-any.whl
-# or
-pipx install ./axism-0.1.0-py3-none-any.whl
 ```
 
 ## Quick start
@@ -190,7 +189,7 @@ Tag `v*` (e.g. `v0.1.0`) to trigger the release workflow.
 ## Releases & CI
 
 - **CI** (`.github/workflows/ci.yml`): pytest, ruff, anonymity check — works on GitHub Actions and Forgejo/Gitea/Codeberg Actions.
-- **Release** (`.github/workflows/release.yml`): on tag `v*`, builds wheel/sdist and uploads release assets.
+- **Release** (`.github/workflows/release.yml`): on tag `v*`, builds wheel/sdist, uploads GitHub release assets, and publishes to PyPI via Trusted Publisher (OIDC).
 
 ```bash
 git tag v0.1.0
