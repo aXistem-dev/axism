@@ -43,12 +43,14 @@ def rename_session(root: Path, session_id: str, title: str) -> tuple[bool, str]:
     ok = False
     problems: list[str] = []
     for directory in directories:
-        if not _is_agent_dir(directory):
-            done, msg = write_cli_meta_name(directory / "store.db", clean)
+        db = directory / "store.db"
+        if not _is_agent_dir(directory) and db.is_file():
+            done, msg = write_cli_meta_name(db, clean)
             ok = ok or done
             if not done:
                 problems.append(msg)
             continue
+        # Agent transcripts and lightweight chats have no title field.
         sidecar = directory / TITLE_SIDECAR
         try:
             sidecar.write_text(

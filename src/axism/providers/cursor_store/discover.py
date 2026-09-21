@@ -162,24 +162,51 @@ def _agent_session(conv_dir: Path, slug: str, cwd: str) -> SessionMeta | None:
     )
 
 
-def _cli_session(chat_dir: Path, slug: str, cwd: str) -> SessionMeta | None:
-    db = chat_dir / "store.db"
-    if not db.is_file():
-        return None
+def _first_history_prompt(chat_dir: Path) -> str | None:
+    """First real prompt in a lightweight chat, ignoring slash commands."""
     try:
-        stat = db.stat()
+        data = json.loads((chat_dir / "prompt_history.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, list):
+        return None
+    for entry in data:
+        if isinstance(entry, str) and entry.strip() and not entry.startswith("/"):
+            return _clean(entry)
+    return None
+
+
+def _cli_session(chat_dir: Path, slug: str, cwd: str) -> SessionMeta | None:
+    """A CLI chat, in either the SQLite store or the newer JSON sidecars."""
+    db = chat_dir / "store.db"
+    meta_json = chat_dir / "meta.json"
+    title = _sidecar_title(chat_dir)
+    first_prompt: str | None = None
+
+    if db.is_file():
+        anchor = db
+        if title is None:
+            name = read_cli_meta(db).get("name")
+            title = name if isinstance(name, str) and name.strip() else None
+    elif meta_json.is_file():
+        anchor = meta_json
+        first_prompt = _first_history_prompt(chat_dir)
+    else:
+        return None
+
+    try:
+        mtime = anchor.stat().st_mtime
     except OSError:
         return None
-    meta = read_cli_meta(db)
-    name = meta.get("name")
+
     return SessionMeta(
         session_id=chat_dir.name,
         project_slug=slug,
         cwd=cwd,
-        title=name if isinstance(name, str) and name.strip() else None,
-        first_prompt=None,
-        transcript_path=db,
-        mtime=stat.st_mtime,
+        title=title,
+        first_prompt=first_prompt,
+        transcript_path=anchor,
+        mtime=mtime,
         size_bytes=path_size(chat_dir),
         entrypoint=KIND_CLI,
     )
