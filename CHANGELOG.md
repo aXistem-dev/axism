@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Cursor provider: IDE agent transcripts (`~/.cursor/projects/<slug>/agent-transcripts/`) and CLI chats (`~/.cursor/chats/<md5-cwd>/<id>/store.db`), with open, stop, rename, move, and delete
+- Cursor provider: IDE agent transcripts (`~/.cursor/projects/<slug>/agent-transcripts/`) and CLI chats (`~/.cursor/chats/<md5-cwd>/<id>/`, both the SQLite and JSON-sidecar shapes), with open, stop, rename, move, and delete
 - Hermes provider: interactive sessions from `~/.hermes/state.db`, opened with `hermes --resume` and mutated through `hermes sessions`
 - `--provider` flag and `axism providers` command
 - Provider `Capabilities`, so keys a backend cannot perform report instead of failing

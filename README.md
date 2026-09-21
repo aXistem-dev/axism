@@ -20,7 +20,7 @@ Works on **Linux** and **macOS**, across three agent backends:
 | Provider | Id | Session store | Config override |
 |----------|----|---------------|-----------------|
 | [Claude Code](https://code.claude.com/) (default) | `claude_code` | `projects/<slug>/<uuid>.jsonl` | `$CLAUDE_CONFIG_DIR` or `~/.claude` |
-| Cursor | `cursor` | `projects/<slug>/agent-transcripts/<id>/` and `chats/<md5-cwd>/<id>/store.db` | `$CURSOR_DATA_DIR` or `~/.cursor` |
+| Cursor | `cursor` | `projects/<slug>/agent-transcripts/<id>/` and `chats/<md5-cwd>/<id>/` | `$CURSOR_DATA_DIR` or `~/.cursor` |
 | Hermes | `hermes` | `state.db` (`sessions` + `messages`) | `$HERMES_HOME` or `~/.hermes` |
 
 Pick one with Settings (`,`) in the TUI or `--provider` on the CLI.
@@ -164,7 +164,7 @@ Every backend implements the same provider interface, and each one refuses what 
 
 Hermes reads `state.db` read-only and only lists interactive sources (`cli`, `tui`, `desktop`, `webui`) — cron and kanban worker sessions stay hidden.
 
-A Cursor chat started from the CLI exists in both stores under one id; aXism shows it once and treats both directories as its fragments.
+A Cursor chat started from the CLI exists in both stores under one id; aXism shows it once and treats both directories as its fragments. CLI chats come in two shapes — a SQLite `store.db` (its `name` is the title) and newer `meta.json` + `prompt_history.json` sidecars (title comes from the first real prompt) — and both are listed.
 
 ### Not managed
 

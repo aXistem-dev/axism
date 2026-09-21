@@ -23,6 +23,7 @@ from axism.providers.cursor_store.paths import (
 AGENT_ONLY = "11111111-2222-3333-4444-555555555555"
 CLI_ONLY = "66666666-7777-8888-9999-aaaaaaaaaaaa"
 BOTH_STORES = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
+CLI_LIGHT = "12341234-5678-90ab-cdef-000000000000"
 
 
 def _write_transcript(conv_dir: Path, chat_id: str, prompt: str) -> None:
@@ -69,6 +70,25 @@ def _write_cli_chat(chat_dir: Path, name: str) -> None:
     (chat_dir / "prompt_history.json").write_text("[]", encoding="utf-8")
 
 
+def _write_light_chat(chat_dir: Path, prompts: list[str]) -> None:
+    """Newer CLI chats keep JSON sidecars instead of a SQLite store."""
+    chat_dir.mkdir(parents=True, exist_ok=True)
+    (chat_dir / "meta.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "createdAtMs": 1700000000000,
+                "hasConversation": False,
+                "updatedAtMs": 1700000001000,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (chat_dir / "prompt_history.json").write_text(
+        json.dumps(prompts), encoding="utf-8"
+    )
+
+
 @pytest.fixture
 def cursor_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str]:
     """Synthetic ~/.cursor tree plus a real workspace dir to resolve slugs."""
@@ -84,6 +104,7 @@ def cursor_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, s
     bucket = root / "chats" / cwd_bucket(workspace)
     _write_cli_chat(bucket / CLI_ONLY, "CLI only chat")
     _write_cli_chat(bucket / BOTH_STORES, "Shared chat")
+    _write_light_chat(bucket / CLI_LIGHT, ["/model", "draft the migration"])
 
     monkeypatch.setenv("CURSOR_DATA_DIR", str(root))
     monkeypatch.delenv("XDG_STATE_HOME", raising=False)
@@ -114,13 +135,16 @@ def test_discover_merges_both_stores(cursor_env: tuple[Path, str]):
     assert project.cwd_guess == workspace
 
     by_id = {s.session_id: s for s in project.sessions}
-    assert set(by_id) == {AGENT_ONLY, CLI_ONLY, BOTH_STORES}
+    assert set(by_id) == {AGENT_ONLY, CLI_ONLY, BOTH_STORES, CLI_LIGHT}
     assert by_id[AGENT_ONLY].entrypoint == "agent"
     assert by_id[AGENT_ONLY].display_title == "explain the build"
     assert by_id[CLI_ONLY].entrypoint == "cli"
     assert by_id[CLI_ONLY].title == "CLI only chat"
     # One chat, two stores: a single row that knows about both.
     assert by_id[BOTH_STORES].entrypoint == "agent+cli"
+    # Sidecar-only chats have no title field; slash commands are not a title.
+    assert by_id[CLI_LIGHT].entrypoint == "cli"
+    assert by_id[CLI_LIGHT].display_title == "draft the migration"
 
 
 def test_fragments_cover_every_store(cursor_env: tuple[Path, str]):
@@ -162,6 +186,21 @@ def test_rename_both_stores_writes_each(cursor_env: tuple[Path, str]):
     assert read_cli_meta(bucket / BOTH_STORES / "store.db")["name"] == "Unified title"
 
 
+def test_light_chat_rename_and_delete(cursor_env: tuple[Path, str]):
+    root, _ = cursor_env
+    provider = CursorProvider()
+
+    ok, msg = provider.rename(CLI_LIGHT, "Migration chat")
+    assert ok, msg
+    bucket = next((root / "chats").iterdir())
+    sidecar = bucket / CLI_LIGHT / TITLE_SIDECAR
+    assert json.loads(sidecar.read_text())["title"] == "Migration chat"
+
+    plan = provider.plan_delete(CLI_LIGHT)
+    provider.execute_deletes([plan], dry_run=False)
+    assert not (bucket / CLI_LIGHT).exists()
+
+
 def test_delete_removes_both_stores(cursor_env: tuple[Path, str]):
     root, _ = cursor_env
     provider = CursorProvider()
@@ -178,7 +217,7 @@ def test_delete_removes_both_stores(cursor_env: tuple[Path, str]):
         s.session_id for p in provider.discover() for s in p.sessions
     }
     assert BOTH_STORES not in remaining
-    assert remaining == {AGENT_ONLY, CLI_ONLY}
+    assert remaining == {AGENT_ONLY, CLI_ONLY, CLI_LIGHT}
 
 
 def test_delete_missing_session_is_blocked(cursor_env: tuple[Path, str]):
