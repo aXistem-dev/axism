@@ -13,17 +13,26 @@ from axism.paths import (
     tmp_claude_roots,
 )
 
-# Paths / names that must never appear in a per-session delete plan
+# Paths / names that must never appear in a per-session delete plan.
+# Shared by every provider — credentials and agent-wide config are off limits.
 PROTECTED_NAMES = frozenset(
     {
         ".credentials.json",
+        ".env",
+        "auth.json",
+        "cli-config.json",
+        "cli-config.yaml",
+        "config.yaml",
+        "control.key",
+        "credentials.json",
+        "mcp-auth.json",
+        "memory",
+        "model-catalog",
+        "plugins",
         "settings.json",
         "settings.local.json",
         "skills",
-        "plugins",
-        "memory",
-        "control.key",
-        "model-catalog",
+        "state.db",
     }
 )
 

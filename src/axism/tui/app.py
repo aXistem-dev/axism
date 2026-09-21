@@ -18,18 +18,16 @@ from textual.widgets._header import HeaderClock, HeaderClockSpace
 from textual.widgets.option_list import Option
 
 from axism import __commit__, version_string
-from axism.delete import (
-    build_delete_plan,
-    build_project_delete_plan,
-    execute_deletes,
-    execute_project_delete,
-)
 from axism.discover import ProjectInfo, SessionMeta
-from axism.fragments import collect_fragments
-from axism.live import LiveSession, exec_open
-from axism.move import MoveResult, move_projects, move_sessions
-from axism.providers import PROVIDER_LABELS, provider_from_settings
-from axism.rename import rename_session
+from axism.live import LiveSession
+from axism.move import MoveResult
+from axism.providers import (
+    PROVIDER_LABELS,
+    UnsupportedOperation,
+    get_provider,
+    provider_config_hint,
+    provider_from_settings,
+)
 from axism.settings import (
     DEFAULT_PROVIDER,
     ProviderPrefs,
@@ -297,7 +295,7 @@ class ConfirmDeleteScreen(ModalScreen[bool]):
             title = f"[b $error]⚠ {self._title}[/]"
             if not self.warnings:
                 warn = (
-                    "!  This removes the whole Claude project dir and linked "
+                    "!  This removes the whole project directory and linked "
                     "session fragments (memory unless kept)."
                 )
         dialog_classes = "-project-danger" if self.project_danger else ""
@@ -348,9 +346,8 @@ HELP_LEGEND = """[b $accent]aXism keys[/]
   c / C             Clear ALL marks (projects + sessions, every project)
 
 [b $success]Session[/] [dim](sessions/detail only)[/]
-  o / O             Open focused session (exits axism)
-                    background/live → claude attach · otherwise → claude --resume
-  s / S             Stop background session(s) — same as /stop while attached
+  o / O             Open focused session in its agent CLI (exits axism)
+  s / S             Stop a live/background session (backend dependent)
   n / N             Rename focused session (custom title)
   /                 Focus session filter
   .                 Cycle session sort (updated / title / size)
@@ -446,7 +443,7 @@ class RenameSessionScreen(ModalScreen[str | None]):
                 f"[b]Rename session[/b]  {self.session_short}…",
                 id="rename-title",
             ),
-            Static("Enter a new title (same as Claude /rename)", id="rename-hint"),
+            Static("Enter a new title for this session", id="rename-hint"),
             Input(
                 value=self.current_title,
                 placeholder="Session title",
@@ -569,8 +566,8 @@ class SettingsScreen(ModalScreen[Settings | None]):
         yield Vertical(
             Static("[b]Settings[/]  ·  provider + config dir", id="settings-title"),
             Static(
-                "Space toggles enabled (future multi-provider). "
-                "Only Claude Code is available today.",
+                "Enter activates the highlighted backend; Space enables or "
+                "disables it in the list.",
                 id="settings-hint",
             ),
             OptionList(*options, id="settings-providers"),
@@ -580,7 +577,7 @@ class SettingsScreen(ModalScreen[Settings | None]):
             ),
             Input(
                 value=path_value,
-                placeholder="~/.claude  or  $CLAUDE_CONFIG_DIR",
+                placeholder=provider_config_hint(active),
                 id="settings-path",
             ),
             Static(
@@ -611,6 +608,7 @@ class SettingsScreen(ModalScreen[Settings | None]):
     def _load_path_input(self, pid: str) -> None:
         inp = self.query_one("#settings-path", Input)
         inp.value = self._config_dirs.get(pid) or ""
+        inp.placeholder = provider_config_hint(pid)
         self._path_for = pid
 
     def _highlighted_provider(self) -> str | None:
@@ -1390,13 +1388,11 @@ class SessionManagerApp(App[None]):
     def _stoppable_among(
         self, sessions: list[SessionMeta]
     ) -> list[tuple[SessionMeta, LiveSession]]:
-        """Background sessions that /stop (claude stop) can target."""
+        """Live sessions the active backend can stop."""
         out: list[tuple[SessionMeta, LiveSession]] = []
         for s in sessions:
             live = self.live.get(s.session_id)
-            if live is None or live.kind != "background":
-                continue
-            if live.state in {"working", "blocked", "running"} or live.is_killable:
+            if self.provider.can_stop(live) and live is not None:
                 out.append((s, live))
         return out
 
@@ -1677,8 +1673,8 @@ class SessionManagerApp(App[None]):
             detail.update("[$text-muted]Select a session[/]")
             return
         live = self.live.get(s.session_id)
-        inv = collect_fragments(
-            s.session_id, project_slug=s.project_slug, root=self.root
+        inv = self.provider.collect_fragments(
+            s.session_id, project_slug=s.project_slug
         )
         title = s.display_title.replace("\n", " ")
         lines = [
@@ -1933,11 +1929,11 @@ class SessionManagerApp(App[None]):
             return
 
         warnings = [
-            "Runs `claude stop` — same effect as typing /stop while attached.",
+            f"Stops the running work via {self.provider.label}.",
             "Conversation/transcript is kept; use Delete to remove files.",
         ]
         lines = [
-            f"[b]{len(targets)} background session(s)[/b] will be stopped.",
+            f"[b]{len(targets)} live session(s)[/b] will be stopped.",
             "",
             "[b]Targets[/b]",
         ]
@@ -1994,9 +1990,14 @@ class SessionManagerApp(App[None]):
         )
 
     def action_resume_session(self) -> None:
-        """Exit axism and hand off to ``claude attach`` or ``claude --resume``."""
+        """Exit axism and hand off to the provider's agent CLI."""
         if self._focus_pane() == "projects":
             self._show_toast("Focus a session to open", success=False, seconds=2.5)
+            return
+        if not self.provider.capabilities.resume:
+            self._show_toast(
+                f"{self.provider.label} cannot open sessions", success=False, seconds=4
+            )
             return
         s = self.selected_session
         if not s:
@@ -2005,6 +2006,9 @@ class SessionManagerApp(App[None]):
         live = self.live.get(s.session_id)
         self.exit(
             {
+                "provider": self.provider.name,
+                "config_dir": str(self.root),
+                "session": s,
                 "open_id": s.session_id,
                 "cwd": s.cwd,
                 "daemon_short": (live.daemon_short if live else None),
@@ -2014,9 +2018,16 @@ class SessionManagerApp(App[None]):
         )
 
     def action_rename_session(self) -> None:
-        """Rename the focused session (append custom-title like Claude /rename)."""
+        """Rename the focused session with the active backend's title mechanism."""
         if self._focus_pane() == "projects":
             self._show_toast("Focus a session to rename", success=False, seconds=2.5)
+            return
+        if not self.provider.capabilities.rename:
+            self._show_toast(
+                f"{self.provider.label} cannot rename sessions",
+                success=False,
+                seconds=4,
+            )
             return
         s = self.selected_session
         if not s:
@@ -2031,12 +2042,11 @@ class SessionManagerApp(App[None]):
             if new_title == current:
                 self._show_toast("Title unchanged", success=False, seconds=2)
                 return
-            ok, msg = rename_session(
-                s.session_id,
-                new_title,
-                root=self.root,
-                project_slug=s.project_slug,
-            )
+            try:
+                ok, msg = self.provider.rename(s.session_id, new_title)
+            except UnsupportedOperation as exc:
+                self._show_toast(str(exc), success=False, seconds=4)
+                return
             self.action_refresh()
             self._show_toast(msg, success=ok, seconds=3.5)
 
@@ -2078,6 +2088,15 @@ class SessionManagerApp(App[None]):
     def action_move_items(self) -> None:
         """Move focused/marked project(s) or session(s) to another project path."""
         pane = self._focus_pane()
+        caps = self.provider.capabilities
+        wants_projects = pane == "projects"
+        if (wants_projects and not caps.move_projects) or (
+            not wants_projects and not caps.move_sessions
+        ):
+            self._show_toast(
+                f"{self.provider.label} cannot move sessions", success=False, seconds=4
+            )
+            return
 
         if pane == "projects":
             targets = self._target_projects()
@@ -2107,7 +2126,7 @@ class SessionManagerApp(App[None]):
                     if not confirmed:
                         self._show_toast("Move cancelled", success=False, seconds=2)
                         return
-                    result = move_projects(targets, dest, root=self.root)
+                    result = self.provider.move_projects(targets, dest)
                     self.selected_project_slugs.clear()
                     self.action_refresh()
                     self._show_toast(result.message, success=result.ok, seconds=4)
@@ -2128,7 +2147,7 @@ class SessionManagerApp(App[None]):
                         "\n".join(body_lines),
                         title=title,
                         warnings=[
-                            "Claude project dir is renamed/merged under ~/.claude/projects/.",
+                            "Renames or merges the backend's project directory.",
                             (
                                 "Creates the workspace folder if missing "
                                 "(does not move your source tree files)."
@@ -2175,7 +2194,7 @@ class SessionManagerApp(App[None]):
                     if not confirmed:
                         self._show_toast("Move cancelled", success=False, seconds=2)
                         return
-                    result = move_sessions(sessions, dest, root=self.root)
+                    result = self.provider.move_sessions(sessions, dest)
                     self.selected_session_ids.clear()
                     self.action_refresh()
                     self._show_toast(result.message, success=result.ok, seconds=4)
@@ -2196,7 +2215,7 @@ class SessionManagerApp(App[None]):
                         "\n".join(body_lines),
                         title=title,
                         warnings=[
-                            "Session files move to the destination Claude project directory.",
+                            "Session files move to the destination project directory.",
                             (
                                 "Creates the workspace folder if missing; cwd fields "
                                 "and history project entries are updated."
@@ -2343,11 +2362,11 @@ class SessionManagerApp(App[None]):
             return
         packed: list[tuple[str, str, object, list[str]]] = []
         for p in projects:
-            plan = build_project_delete_plan(
-                p.slug, root=self.root, force=True, keep_memory=False
+            plan = self.provider.plan_project_delete(
+                p.slug, force=True, keep_memory=False
             )
-            preview = execute_project_delete(
-                plan, root=self.root, dry_run=True, force=True, stop_live=True
+            preview = self.provider.execute_project_delete(
+                plan, dry_run=True, force=True, stop_live=True
             )
             packed.append((p.slug, p.cwd_guess, plan, preview))
         body, warnings = _format_project_delete_confirm(packed)
@@ -2360,12 +2379,11 @@ class SessionManagerApp(App[None]):
                 return
             all_actions: list[str] = []
             for slug in slugs:
-                plan_exec = build_project_delete_plan(
-                    slug, root=self.root, force=True, keep_memory=False
+                plan_exec = self.provider.plan_project_delete(
+                    slug, force=True, keep_memory=False
                 )
-                actions = execute_project_delete(
+                actions = self.provider.execute_project_delete(
                     plan_exec,
-                    root=self.root,
                     dry_run=False,
                     force=True,
                     stop_live=True,
@@ -2389,7 +2407,7 @@ class SessionManagerApp(App[None]):
                 ),
                 warnings=warnings
                 + [
-                    "Deletes the Claude project directory and linked session data.",
+                    "Deletes the backend's project directory and linked session data.",
                     "Source workspace files on disk are not moved or removed.",
                 ],
                 confirm_verb="Delete",
@@ -2403,16 +2421,15 @@ class SessionManagerApp(App[None]):
             self._show_toast("No session selected", success=False, seconds=2.5)
             return
         plans = [
-            build_delete_plan(
+            self.provider.plan_delete(
                 s.session_id,
                 project_slug=s.project_slug,
-                root=self.root,
                 force=True,
             )
             for s in targets
         ]
-        preview_actions = execute_deletes(
-            plans, root=self.root, dry_run=True, force=True, stop_live=True
+        preview_actions = self.provider.execute_deletes(
+            plans, dry_run=True, force=True, stop_live=True
         )
         body, warnings = _format_session_delete_confirm(
             targets, plans, preview_actions
@@ -2424,16 +2441,15 @@ class SessionManagerApp(App[None]):
                 self._show_toast("Delete cancelled", success=False, seconds=2.5)
                 return
             plans_exec = [
-                build_delete_plan(
+                self.provider.plan_delete(
                     s.session_id,
                     project_slug=s.project_slug,
-                    root=self.root,
                     force=True,
                 )
                 for s in targets
             ]
-            actions = execute_deletes(
-                plans_exec, root=self.root, dry_run=False, force=True, stop_live=True
+            actions = self.provider.execute_deletes(
+                plans_exec, dry_run=False, force=True, stop_live=True
             )
             ok, msg = _summarize_session_delete(targets, actions)
             self.selected_session_ids.clear()
@@ -2465,20 +2481,24 @@ def run_tui() -> None:
     result = app.run()
     if not isinstance(result, dict):
         return
-    open_id = result.get("open_id") or result.get("resume_id")
-    if not open_id:
+    session = result.get("session")
+    if not isinstance(session, SessionMeta):
         return
     live = None
     if result.get("live_kind"):
         live = LiveSession(
-            session_id=str(open_id),
+            session_id=session.session_id,
             kind=str(result["live_kind"]),
             state=result.get("live_state"),
             daemon_short=result.get("daemon_short"),
         )
+    provider = get_provider(
+        str(result.get("provider") or DEFAULT_PROVIDER),
+        config_dir=result.get("config_dir"),
+    )
     try:
-        exec_open(str(open_id), cwd=result.get("cwd"), live=live)
-    except FileNotFoundError as exc:
+        provider.resume(session, live)
+    except (FileNotFoundError, UnsupportedOperation) as exc:
         print(f"axism: {exc}", file=__import__("sys").stderr)
         raise SystemExit(1) from exc
     except OSError as exc:

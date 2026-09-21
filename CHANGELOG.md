@@ -9,8 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Cursor provider: IDE agent transcripts (`~/.cursor/projects/<slug>/agent-transcripts/`) and CLI chats (`~/.cursor/chats/<md5-cwd>/<id>/store.db`), with open, stop, rename, move, and delete
+- Hermes provider: interactive sessions from `~/.hermes/state.db`, opened with `hermes --resume` and mutated through `hermes sessions`
+- `--provider` flag and `axism providers` command
+- Provider `Capabilities`, so keys a backend cannot perform report instead of failing
 - Publish tagged releases to PyPI via GitHub Actions Trusted Publisher (OIDC)
 - Project homepage / repository / issues URLs in package metadata
+
+### Changed
+
+- `SessionProvider` covers discovery, liveness, open/stop, fragments, rename, move, and delete; the TUI and CLI no longer reach into Claude Code's modules directly
+- `--config-dir` overrides the active provider's root instead of always setting `$CLAUDE_CONFIG_DIR`
+- Credentials, agent config files, and backend databases are protected for every provider
 
 ### Fixed
 

@@ -8,18 +8,15 @@ import sys
 from pathlib import Path
 
 from axism import version_string
-from axism.delete import (
-    build_delete_plan,
-    build_project_delete_plan,
-    execute_deletes,
-    execute_project_delete,
+from axism.discover import filter_projects_by_cwd
+from axism.providers import (
+    PROVIDER_LABELS,
+    SessionProvider,
+    UnsupportedOperation,
+    get_provider,
+    provider_from_settings,
 )
-from axism.discover import discover_all, filter_projects_by_cwd, find_session
-from axism.fragments import collect_fragments
-from axism.live import exec_open, merge_live, open_command, purge_project_cli, slash_stop
-from axism.move import move_projects, move_sessions
-from axism.paths import config_root
-from axism.rename import rename_session
+from axism.settings import load_settings
 
 
 def _fmt_size(n: int) -> str:
@@ -31,12 +28,25 @@ def _fmt_size(n: int) -> str:
     return f"{x:.1f}TB"
 
 
+def _provider(args: argparse.Namespace) -> SessionProvider:
+    """Active backend: ``--provider`` / settings, with ``--config-dir`` override."""
+    name = getattr(args, "provider", None)
+    config_dir = getattr(args, "config_dir", None)
+    if name:
+        return get_provider(name, config_dir=config_dir)
+    settings = load_settings()
+    if config_dir:
+        return get_provider(settings.active_provider, config_dir=config_dir)
+    return provider_from_settings(settings)
+
+
 def cmd_list(args: argparse.Namespace) -> int:
-    root = Path(args.config_dir).expanduser() if args.config_dir else config_root()
-    projects = discover_all(root)
+    provider = _provider(args)
+    root = provider.config_root()
+    projects = provider.discover()
     if args.project:
         projects = filter_projects_by_cwd(projects, args.project)
-    live = merge_live(root, use_cli=not args.no_cli)
+    live = provider.merge_live(use_cli=not args.no_cli)
 
     if args.json:
         payload = []
@@ -45,6 +55,7 @@ def cmd_list(args: argparse.Namespace) -> int:
                 lv = live.get(s.session_id)
                 payload.append(
                     {
+                        "provider": provider.name,
                         "session_id": s.session_id,
                         "project_slug": s.project_slug,
                         "cwd": s.cwd,
@@ -80,6 +91,8 @@ def cmd_list(args: argparse.Namespace) -> int:
                     tags.append("live")
                 if lv.state:
                     tags.append(str(lv.state))
+            if s.entrypoint:
+                tags.append(s.entrypoint)
             if s.has_bridge:
                 tags.append("remote")
             tag_s = f" [{', '.join(tags)}]" if tags else ""
@@ -95,16 +108,17 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 
 def cmd_show(args: argparse.Namespace) -> int:
-    root = Path(args.config_dir).expanduser() if args.config_dir else config_root()
-    found = find_session(args.session_id, root)
+    provider = _provider(args)
+    found = provider.find_session(args.session_id)
     if not found:
         print(f"Session not found: {args.session_id}", file=sys.stderr)
         return 1
     proj, sess = found
-    live = merge_live(root, use_cli=not args.no_cli).get(sess.session_id)
-    inv = collect_fragments(
-        sess.session_id, project_slug=sess.project_slug, root=root
+    live = provider.merge_live(use_cli=not args.no_cli).get(sess.session_id)
+    inv = provider.collect_fragments(
+        sess.session_id, project_slug=sess.project_slug
     )
+    print(f"provider:  {provider.label} ({provider.name})")
     print(f"title:     {sess.display_title}")
     print(f"session:   {sess.session_id}")
     print(f"project:   {proj.slug}")
@@ -121,12 +135,11 @@ def cmd_show(args: argparse.Namespace) -> int:
 
 
 def cmd_delete(args: argparse.Namespace) -> int:
-    root = Path(args.config_dir).expanduser() if args.config_dir else config_root()
+    provider = _provider(args)
     ids: list[str] = list(args.session_ids)
     plans = [
-        build_delete_plan(
+        provider.plan_delete(
             sid,
-            root=root,
             force=args.force,
             use_cli=not args.no_cli,
         )
@@ -138,9 +151,7 @@ def cmd_delete(args: argparse.Namespace) -> int:
         print()
 
     if args.dry_run or not args.yes:
-        actions = execute_deletes(
-            plans, root=root, dry_run=True, force=args.force
-        )
+        actions = provider.execute_deletes(plans, dry_run=True, force=args.force)
         print("-- dry-run --")
         for a in actions:
             print(a)
@@ -160,9 +171,8 @@ def cmd_delete(args: argparse.Namespace) -> int:
             print(f"Blocked: {p.session_id}: {p.blocked_reason}", file=sys.stderr)
         return 2
 
-    actions = execute_deletes(
+    actions = provider.execute_deletes(
         plans,
-        root=root,
         dry_run=False,
         force=args.force,
         stop_live=not args.no_stop,
@@ -173,10 +183,9 @@ def cmd_delete(args: argparse.Namespace) -> int:
 
 
 def cmd_delete_project(args: argparse.Namespace) -> int:
-    root = Path(args.config_dir).expanduser() if args.config_dir else config_root()
-    plan = build_project_delete_plan(
+    provider = _provider(args)
+    plan = provider.plan_project_delete(
         args.target,
-        root=root,
         force=args.force,
         use_cli=not args.no_cli,
         keep_memory=args.keep_memory,
@@ -185,8 +194,8 @@ def cmd_delete_project(args: argparse.Namespace) -> int:
         print(line)
 
     if args.dry_run or not args.yes:
-        actions = execute_project_delete(
-            plan, root=root, dry_run=True, force=args.force
+        actions = provider.execute_project_delete(
+            plan, dry_run=True, force=args.force
         )
         print("-- dry-run --")
         for a in actions:
@@ -204,9 +213,8 @@ def cmd_delete_project(args: argparse.Namespace) -> int:
         print(f"Blocked: {plan.blocked_reason}", file=sys.stderr)
         return 2
 
-    actions = execute_project_delete(
+    actions = provider.execute_project_delete(
         plan,
-        root=root,
         dry_run=False,
         force=args.force,
         stop_live=not args.no_stop,
@@ -217,22 +225,21 @@ def cmd_delete_project(args: argparse.Namespace) -> int:
 
 
 def cmd_resume(args: argparse.Namespace) -> int:
-    root = Path(args.config_dir).expanduser() if args.config_dir else config_root()
-    found = find_session(args.session_id, root)
+    provider = _provider(args)
+    found = provider.find_session(args.session_id)
     if not found:
         print(f"Session not found: {args.session_id}", file=sys.stderr)
         return 1
     _proj, sess = found
-    live = merge_live(root, use_cli=not args.no_cli).get(sess.session_id)
-    cwd = sess.cwd
+    live = provider.merge_live(use_cli=not args.no_cli).get(sess.session_id)
     if args.print_only:
-        argv, _ = open_command(sess.session_id, cwd=cwd, live=live)
+        argv, cwd = provider.open_command(sess, live)
         print(" ".join(argv))
         if cwd:
             print(f"# cwd: {cwd}")
         return 0
     try:
-        exec_open(sess.session_id, cwd=cwd, live=live)
+        provider.resume(sess, live)
     except FileNotFoundError as exc:
         print(f"axism: {exc}", file=sys.stderr)
         return 1
@@ -244,36 +251,36 @@ def cmd_resume(args: argparse.Namespace) -> int:
 
 def cmd_stop(args: argparse.Namespace) -> int:
     """Stop a background session (same as /stop while attached)."""
-    root = Path(args.config_dir).expanduser() if args.config_dir else config_root()
-    found = find_session(args.session_id, root)
+    provider = _provider(args)
+    found = provider.find_session(args.session_id)
     if not found:
         print(f"Session not found: {args.session_id}", file=sys.stderr)
         return 1
     _proj, sess = found
-    live = merge_live(root, use_cli=not args.no_cli).get(sess.session_id)
+    live = provider.merge_live(use_cli=not args.no_cli).get(sess.session_id)
     if not args.yes:
         state = live.state if live else "?"
         kind = live.kind if live else "?"
-        print(f"Would stop {sess.session_id} kind={kind} state={state} (claude stop)")
+        print(f"Would stop {sess.session_id} kind={kind} state={state}")
         print("Pass --yes to execute.", file=sys.stderr)
         return 0
-    ok, msg = slash_stop(sess.session_id, live, root=root)
+    ok, msg = provider.slash_stop(sess.session_id, live)
     print(msg)
     return 0 if ok else 1
 
 
-
 def cmd_rename(args: argparse.Namespace) -> int:
-    root = Path(args.config_dir).expanduser() if args.config_dir else config_root()
-    ok, msg = rename_session(args.session_id, args.title, root=root)
+    provider = _provider(args)
+    ok, msg = provider.rename(args.session_id, args.title)
     print(msg)
     return 0 if ok else 1
 
 
 def cmd_move(args: argparse.Namespace) -> int:
-    root = Path(args.config_dir).expanduser() if args.config_dir else config_root()
+    provider = _provider(args)
+    root = provider.config_root()
     if args.project:
-        projects = discover_all(root)
+        projects = provider.discover()
         by_slug = {p.slug: p for p in projects}
         by_cwd = {p.cwd_guess: p for p in projects}
         targets = []
@@ -289,23 +296,22 @@ def cmd_move(args: argparse.Namespace) -> int:
                 return 1
             targets.append(p)
         merge_memory = not args.no_merge_memory
-        result = move_projects(
+        result = provider.move_projects(
             targets,
             args.to,
-            root=root,
             dry_run=args.dry_run,
             merge_memory=merge_memory,
         )
     else:
         sessions = []
         for sid in args.ids:
-            found = find_session(sid, root)
+            found = provider.find_session(sid)
             if not found:
                 print(f"Session not found: {sid}", file=sys.stderr)
                 return 1
             _proj, sess = found
             sessions.append(sess)
-        result = move_sessions(sessions, args.to, root=root, dry_run=args.dry_run)
+        result = provider.move_sessions(sessions, args.to, dry_run=args.dry_run)
     for line in result.actions:
         print(line)
     print(result.message)
@@ -366,7 +372,8 @@ def cmd_move(args: argparse.Namespace) -> int:
 
 
 def cmd_purge_project(args: argparse.Namespace) -> int:
-    rc, out = purge_project_cli(
+    provider = _provider(args)
+    rc, out = provider.purge_project(
         args.path,
         dry_run=args.dry_run or not args.yes,
         all_projects=args.all,
@@ -374,10 +381,25 @@ def cmd_purge_project(args: argparse.Namespace) -> int:
     print(out)
     if not args.yes and not args.dry_run and not args.all:
         print(
-            "Pass --yes to execute (or --dry-run). This wraps `claude project purge`.",
+            "Pass --yes to execute (or --dry-run).",
             file=sys.stderr,
         )
     return rc
+
+
+def cmd_providers(args: argparse.Namespace) -> int:
+    """List registered backends and where each stores sessions."""
+    settings = load_settings()
+    for pid, label in PROVIDER_LABELS.items():
+        prefs = settings.provider_prefs(pid)
+        marker = "*" if pid == settings.active_provider else " "
+        try:
+            root = str(get_provider(pid, config_dir=prefs.config_dir).config_root())
+        except (OSError, KeyError, UnsupportedOperation) as exc:
+            root = f"<unavailable: {exc}>"
+        state = "enabled" if prefs.enabled else "disabled"
+        print(f"{marker} {pid:<12} {label:<14} {state:<9} {root}")
+    return 0
 
 
 def cmd_tui(_args: argparse.Namespace) -> int:
@@ -388,15 +410,25 @@ def cmd_tui(_args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    # SUPPRESS keeps a value given before the subcommand from being reset to
+    # the subparser's default (argparse re-applies defaults for parents=[…]).
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
+        "--provider",
+        choices=sorted(PROVIDER_LABELS),
+        default=argparse.SUPPRESS,
+        help="Backend to use (default: active provider from settings)",
+    )
+    common.add_argument(
         "--config-dir",
-        help="Override Claude config root (default: $CLAUDE_CONFIG_DIR or ~/.claude)",
+        default=argparse.SUPPRESS,
+        help="Override the active provider's config root",
     )
     common.add_argument(
         "--no-cli",
         action="store_true",
-        help="Do not call `claude agents` for live enrichment",
+        default=argparse.SUPPRESS,
+        help="Do not shell out to the agent CLI for live enrichment",
     )
 
     p = argparse.ArgumentParser(
@@ -411,6 +443,11 @@ def build_parser() -> argparse.ArgumentParser:
     tui = sub.add_parser("tui", help="Open the Textual TUI (default)", parents=[common])
     tui.set_defaults(func=cmd_tui)
 
+    providers = sub.add_parser(
+        "providers", help="List backends and their config roots", parents=[common]
+    )
+    providers.set_defaults(func=cmd_providers)
+
     ls = sub.add_parser("list", help="List sessions across projects", parents=[common])
     ls.add_argument("--project", help="Filter by project cwd")
     ls.add_argument("--json", action="store_true", help="JSON output")
@@ -424,7 +461,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     resume = sub.add_parser(
         "resume",
-        help="Open a session via `claude attach` (live bg) or `claude --resume`",
+        help="Open a session with the provider's agent CLI",
         parents=[common],
     )
     resume.add_argument("session_id")
@@ -446,7 +483,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     rename = sub.add_parser(
         "rename",
-        help="Rename a session (append custom-title, like /rename)",
+        help="Rename a session",
         parents=[common],
     )
     rename.add_argument("session_id")
@@ -507,7 +544,7 @@ def build_parser() -> argparse.ArgumentParser:
     delete.add_argument(
         "session_ids",
         nargs="+",
-        help="Session UUID(s) or unique prefixes",
+        help="Session id(s) or unique prefixes",
     )
     delete.add_argument(
         "--dry-run", action="store_true", help="Show plan without deleting"
@@ -521,13 +558,13 @@ def build_parser() -> argparse.ArgumentParser:
     delete.add_argument(
         "--no-stop",
         action="store_true",
-        help="Do not call claude stop/rm before delete",
+        help="Do not stop a live session before delete",
     )
     delete.set_defaults(func=cmd_delete)
 
     del_proj = sub.add_parser(
         "delete-project",
-        help="Delete a projects/<slug> dir (empty or full) and session fragments",
+        help="Delete a project directory (empty or full) and session fragments",
         parents=[common],
     )
     del_proj.add_argument(
@@ -544,18 +581,18 @@ def build_parser() -> argparse.ArgumentParser:
     del_proj.add_argument(
         "--keep-memory",
         action="store_true",
-        help="Keep projects/<slug>/memory/ when wiping the project",
+        help="Keep the project's memory/ directory when wiping it",
     )
     del_proj.add_argument(
         "--no-stop",
         action="store_true",
-        help="Do not call claude stop/rm before delete",
+        help="Do not stop live sessions before delete",
     )
     del_proj.set_defaults(func=cmd_delete_project)
 
     purge = sub.add_parser(
         "purge-project",
-        help="Wrap `claude project purge` for whole-project wipe",
+        help="Wrap the provider's project purge command (Claude Code only)",
         parents=[common],
     )
     purge.add_argument("path", nargs="?", help="Project path")
@@ -572,15 +609,22 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if not args.command:
         args.func = cmd_tui
+    if not hasattr(args, "no_cli"):
+        args.no_cli = False
     if getattr(args, "config_dir", None):
         import os
 
-        os.environ["CLAUDE_CONFIG_DIR"] = str(
-            Path(args.config_dir).expanduser().resolve()
-        )
-    if not hasattr(args, "no_cli"):
-        args.no_cli = False
-    rc = args.func(args)
+        resolved = str(Path(args.config_dir).expanduser().resolve())
+        args.config_dir = resolved
+        # Claude Code also reads its root from the environment (slug encoding).
+        name = getattr(args, "provider", None) or load_settings().active_provider
+        if name == "claude_code":
+            os.environ["CLAUDE_CONFIG_DIR"] = resolved
+    try:
+        rc = args.func(args)
+    except UnsupportedOperation as exc:
+        print(f"axism: {exc}", file=sys.stderr)
+        raise SystemExit(2) from None
     raise SystemExit(rc)
 
 
