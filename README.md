@@ -15,7 +15,15 @@
   </a>
 </p>
 
-Works on **Linux** and **macOS**. The first backend is [Claude Code](https://code.claude.com/) (`$CLAUDE_CONFIG_DIR` or `~/.claude`). More agents (Cursor, OpenCode, Codex, …) can plug in later via providers.
+Works on **Linux** and **macOS**, across three agent backends:
+
+| Provider | Id | Session store | Config override |
+|----------|----|---------------|-----------------|
+| [Claude Code](https://code.claude.com/) (default) | `claude_code` | `projects/<slug>/<uuid>.jsonl` | `$CLAUDE_CONFIG_DIR` or `~/.claude` |
+| Cursor | `cursor` | `projects/<slug>/agent-transcripts/<id>/` and `chats/<md5-cwd>/<id>/store.db` | `$CURSOR_DATA_DIR` or `~/.cursor` |
+| Hermes | `hermes` | `state.db` (`sessions` + `messages`) | `$HERMES_HOME` or `~/.hermes` |
+
+Pick one with Settings (`,`) in the TUI or `--provider` on the CLI.
 
 ## Features
 
@@ -32,7 +40,8 @@ Works on **Linux** and **macOS**. The first backend is [Claude Code](https://cod
 - Safe delete with confirm (stops live processes when deleting)
 - Header shows brand with version/commit beside it; `v` for runtime details
 - Sessions pane: `/` filter, `.` cycle sort (updated / title / size)
-- Open sessions via the provider CLI (`claude attach` for live background, else `claude --resume`)
+- Open sessions via the provider CLI (`claude attach` / `claude --resume`, `cursor-agent --resume`, `hermes --resume`)
+- Keys that a backend cannot perform say so instead of failing halfway
 - Headless CLI for scripting
 
 ## Install
@@ -130,13 +139,46 @@ axism delete-project -home-alice-src-demo --yes --keep-memory
 axism purge-project /home/alice/src/demo --dry-run   # wraps: claude project purge
 ```
 
-Global flags: `--config-dir`, `--no-cli` (skip `claude agents` live enrichment), `--version`.
+Global flags: `--provider {claude_code,cursor,hermes}`, `--config-dir`, `--no-cli` (skip agent-CLI live enrichment), `--version`.
 
-TUI **Settings** (`,`) stores the active provider and optional config dir in `~/.config/axism/settings.json` (or `$AXISM_CONFIG_DIR`). Today only **Claude Code** is listed; the file shape already supports enabling/disabling multiple providers later. CLI `--config-dir` / `$CLAUDE_CONFIG_DIR` still override when no settings `config_dir` is set.
+```bash
+axism providers                      # backends, enabled state, and resolved roots
+axism --provider cursor list
+axism --provider hermes show <session-id>
+```
+
+TUI **Settings** (`,`) stores the active provider and optional config dir in `~/.config/axism/settings.json` (or `$AXISM_CONFIG_DIR`) under `providers.<id>`. `--provider` overrides the saved choice for one command; `--config-dir` overrides that backend's root.
+
+## Backend differences
+
+Every backend implements the same provider interface, and each one refuses what its agent genuinely cannot do:
+
+| Capability | Claude Code | Cursor | Hermes |
+|------------|-------------|--------|--------|
+| Open / resume | `claude attach` or `claude --resume` | `cursor-agent --resume` | `hermes --resume` |
+| Stop | `claude stop` on background jobs | ends the `cursor-agent` process | ends the `hermes` process |
+| Rename | `custom-title` transcript record | `store.db` name / title sidecar | `hermes sessions rename` |
+| Move sessions / projects | yes, with `memory/` merge | yes (relocates chat dirs) | not supported |
+| Delete session | fragment plan across the tree | removes the chat dir in each store | `hermes sessions delete` |
+| Project purge | `claude project purge` | not supported | not supported |
+
+Hermes reads `state.db` read-only and only lists interactive sources (`cli`, `tui`, `desktop`, `webui`) — cron and kanban worker sessions stay hidden.
+
+A Cursor chat started from the CLI exists in both stores under one id; aXism shows it once and treats both directories as its fragments.
+
+### Not managed
+
+These stores are intentionally left alone:
+
+- Hermes named profiles (`~/.hermes/profiles/<name>/`, each with its own `state.db`), kanban boards (`kanban.db`), and `hermes project` workspaces (`projects.db`)
+- Hermes gateway/messaging sessions (Telegram, Discord, Slack, …) and cron runs
+- Cursor's desktop Composer history in the Electron profile (`~/.config/Cursor` / `~/Library/Application Support/Cursor`)
 
 ## How it works
 
-aXism scans the active **provider** config root (Claude Code: `~/.claude`), maps each session UUID to transcripts, jobs, subagents, caches, and live registry entries, then lets you open, stop, rename, move, or delete those fragments without touching protected global state.
+aXism scans the active **provider** config root, maps each session id to its transcripts, jobs, subagents, caches, and live records, then lets you open, stop, rename, move, or delete those fragments without touching protected global state. The TUI and CLI only ever call the provider interface in [`src/axism/providers/base.py`](src/axism/providers/base.py); each backend owns its own layout under `providers/<name>_store/`.
+
+Claude Code's tree:
 
 ```text
 configRoot
@@ -155,7 +197,7 @@ Project slugs are Claude Code’s encoding of an absolute cwd (non-alphanumeric 
 
 ## What is protected
 
-Never deleted with a session: credentials, settings, skills, plugins, daemon keys, project `memory/`, and unrelated global caches.
+Never deleted with a session: credentials (`auth.json`, `.credentials.json`, `.env`), agent config (`settings.json`, `config.yaml`, `cli-config.json`), skills, plugins, daemon keys, project `memory/`, the Hermes `state.db`, and unrelated global caches.
 
 **Project delete** removes `projects/<slug>/` (memory unless `--keep-memory`) plus linked session fragments outside that directory.
 
