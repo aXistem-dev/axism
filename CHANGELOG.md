@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Responsive projects/sessions tables: density modes (full/cozy/tight), flex pane ratios with min-widths, agent glyph inlined when narrow, and horizontal scrollbars disabled so small terminals stay keyboard-friendly
 
+### Fixed
+
+- README links (License, CI workflow, AGENTS.md, CHANGELOG.md) now use absolute GitHub URLs so they resolve correctly from the PyPI project page instead of only working on GitHub
+
 ## [0.1.1] — 2026-09-23
 
 ### Added

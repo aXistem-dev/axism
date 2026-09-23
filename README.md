@@ -4,10 +4,10 @@
 
 **Agent Interactive Session Manager.** Browse, open, and clean up the chat sessions your coding agents keep on disk, across every project on your machine.
 
-[![CI](https://img.shields.io/badge/CI-pytest%20%2B%20ruff-brightgreen.svg)](.github/workflows/ci.yml)
+[![CI](https://img.shields.io/badge/CI-pytest%20%2B%20ruff-brightgreen.svg)](https://github.com/aXistem-dev/axism/blob/main/.github/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/axism.svg)](https://pypi.org/project/axism/)
 [![GitHub Release](https://img.shields.io/github/v/release/aXistem-dev/axism)](https://github.com/aXistem-dev/axism/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/aXistem-dev/axism/blob/main/LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Buy Me A Coffee](https://img.shields.io/badge/buy%20me%20a%20coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/confituurke)
 
@@ -132,8 +132,8 @@ uv run pytest
 ./scripts/install.sh   # install your local checkout as the axism command
 ```
 
-See [AGENTS.md](AGENTS.md) for contributor rules and the release process, and [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
+See [AGENTS.md](https://github.com/aXistem-dev/axism/blob/main/AGENTS.md) for contributor rules and the release process, and [CHANGELOG.md](https://github.com/aXistem-dev/axism/blob/main/CHANGELOG.md) for what changed in each version.
 
 ## License
 
-[MIT](LICENSE) © aXism contributors
+[MIT](https://github.com/aXistem-dev/axism/blob/main/LICENSE) © aXism contributors
