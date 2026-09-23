@@ -33,6 +33,7 @@ from axism.providers import (
     provider_config_hint,
     roots_summary,
 )
+from axism.providers.transfer import transfer_sessions
 from axism.settings import (
     DEFAULT_PROVIDER,
     ProviderPrefs,
@@ -385,8 +386,9 @@ HELP_LEGEND = """[b $accent]aXism keys[/]
   Esc               Clear filter (when filter focused)
 
 [b $primary]Move[/]
-  m / M             Projects: move project(s) · Sessions/Detail: move session(s)
+  m / M             Projects: move project(s) · Sessions/Detail: move/copy session(s)
                     pick existing project or type a destination path
+                    (same agent relocates; other agent copies text turns, source kept)
                     (Tab path field · project merges include memory/)
 
 [b $error]Delete[/]
@@ -2176,23 +2178,47 @@ class SessionManagerApp(App[None]):
         *,
         exclude_slugs: set[str] | None = None,
         provider_name: str | None = None,
+        any_provider: bool = False,
     ) -> list[tuple[str, str]]:
         exclude = exclude_slugs or set()
         choices: list[tuple[str, str]] = []
         for p in self.projects:
-            if p.slug in exclude:
-                continue
-            if provider_name and p.provider and p.provider != provider_name:
-                continue
-            agent = self._agent_label(p.provider)
-            label = (
-                f"{agent} · {p.cwd_guess}  ·  {p.session_count} sess · "
-                f"{_fmt_size(p.total_bytes)}"
-                if self._multi_agent()
-                else f"{p.cwd_guess}  ·  {p.session_count} sess · {_fmt_size(p.total_bytes)}"
-            )
-            choices.append((p.cwd_guess, label))
+            if any_provider:
+                if (
+                    provider_name
+                    and p.provider == provider_name
+                    and p.slug in exclude
+                ):
+                    continue
+            else:
+                if p.slug in exclude:
+                    continue
+                if provider_name and p.provider and p.provider != provider_name:
+                    continue
+            if any_provider or self._multi_agent():
+                agent = self._agent_label(p.provider)
+                label = (
+                    f"{agent} · {p.cwd_guess}  ·  {p.session_count} sess · "
+                    f"{_fmt_size(p.total_bytes)}"
+                )
+                dest_id = f"{p.provider or '?'}|{p.cwd_guess}"
+            else:
+                label = (
+                    f"{p.cwd_guess}  ·  {p.session_count} sess · "
+                    f"{_fmt_size(p.total_bytes)}"
+                )
+                dest_id = p.cwd_guess
+            choices.append((dest_id, label))
         return choices
+
+    def _parse_move_dest(self, dest: str) -> tuple[str | None, str]:
+        """Split ``provider|cwd`` dest ids; bare paths return (None, path)."""
+        if "|" not in dest:
+            return None, dest
+        pid, _, path = dest.partition("|")
+        if pid in PROVIDER_LABELS and path:
+            return pid, path
+        return None, dest
 
     def _sessions_are_live_blocked(self, sessions: list[SessionMeta]) -> str | None:
         """Return a short reason if any session should be stopped before move."""
@@ -2243,10 +2269,11 @@ class SessionManagerApp(App[None]):
                 "Destinations are limited to the same agent tool."
             )
 
-            def _after_dest(dest: str | None) -> None:
-                if not dest:
+            def _after_dest(dest_raw: str | None) -> None:
+                if not dest_raw:
                     self._show_toast("Move cancelled", success=False, seconds=2)
                     return
+                _pid, dest = self._parse_move_dest(dest_raw)
 
                 def _after_confirm(confirmed: bool | None) -> None:
                     if not confirmed:
@@ -2308,40 +2335,75 @@ class SessionManagerApp(App[None]):
             if pname is None:
                 return
             provider = provider_by_name(self.providers, pname) or self.provider
-            if not provider.capabilities.move_sessions:
-                self._show_toast(
-                    f"{provider.label} cannot move sessions", success=False, seconds=4
-                )
-                return
             blocked = self._sessions_are_live_blocked(sessions)
             if blocked:
                 self._show_toast(blocked, success=False, seconds=4)
                 return
             exclude = {s.project_slug for s in sessions}
             n = len(sessions)
-            title = f"Move {n} session{'s' if n != 1 else ''}"
+            cross = self._multi_agent()
+            title = (
+                f"Move/copy {n} session{'s' if n != 1 else ''}"
+                if cross
+                else f"Move {n} session{'s' if n != 1 else ''}"
+            )
             hint = (
-                "Select destination project, or type an absolute workspace path "
-                "(creates the project dir if needed). Same agent tool only."
+                "Pick a destination project (any enabled agent) or type a path. "
+                "Same agent relocates files; another agent copies text turns "
+                "(source kept)."
+                if cross
+                else (
+                    "Select destination project, or type an absolute workspace path "
+                    "(creates the project dir if needed)."
+                )
             )
 
-            def _after_dest(dest: str | None) -> None:
-                if not dest:
+            def _after_dest(dest_raw: str | None) -> None:
+                if not dest_raw:
                     self._show_toast("Move cancelled", success=False, seconds=2)
+                    return
+                dest_provider_id, dest = self._parse_move_dest(dest_raw)
+                if dest_provider_id is None:
+                    dest_provider_id = pname
+                dest_provider = (
+                    provider_by_name(self.providers, dest_provider_id) or provider
+                )
+                is_cross = dest_provider.name != provider.name
+
+                if not is_cross and not provider.capabilities.move_sessions:
+                    self._show_toast(
+                        f"{provider.label} cannot move sessions",
+                        success=False,
+                        seconds=4,
+                    )
                     return
 
                 def _after_confirm(confirmed: bool | None) -> None:
                     if not confirmed:
                         self._show_toast("Move cancelled", success=False, seconds=2)
                         return
-                    result = provider.move_sessions(sessions, dest)
+                    if is_cross:
+                        result = transfer_sessions(
+                            provider, dest_provider, sessions, dest
+                        )
+                        msg = result.message
+                        ok = result.ok
+                    else:
+                        result_m = provider.move_sessions(sessions, dest)
+                        msg = result_m.message
+                        ok = result_m.ok
                     self.selected_session_ids.clear()
                     self.action_refresh()
-                    self._show_toast(result.message, success=result.ok, seconds=4)
+                    self._show_toast(msg, success=ok, seconds=5)
 
                 body_lines = [
                     f"[b]{n} session(s)[/b] → [$secondary]{dest}[/]",
-                    f"[$text-muted]via {provider.label}[/]",
+                    (
+                        f"[$text-muted]{provider.label} → {dest_provider.label} "
+                        f"(copy, source kept)[/]"
+                        if is_cross
+                        else f"[$text-muted]via {provider.label} (relocate)[/]"
+                    ),
                     "",
                     "[b]Targets[/b]",
                 ]
@@ -2351,18 +2413,27 @@ class SessionManagerApp(App[None]):
                     )
                 if n > 30:
                     body_lines.append(f"  … +{n - 30} more")
+                warnings = (
+                    [
+                        "Cross-agent copy keeps the source session.",
+                        "Only user/assistant text turns are transferred; tools are collapsed.",
+                        "Cursor destinations may not fully resume in cursor-agent.",
+                    ]
+                    if is_cross
+                    else [
+                        "Session files move to the destination project directory.",
+                        (
+                            "Creates the workspace folder if missing; cwd fields "
+                            "and history project entries are updated."
+                        ),
+                    ]
+                )
                 self.push_screen(
                     ConfirmDeleteScreen(
                         "\n".join(body_lines),
-                        title=title,
-                        warnings=[
-                            "Session files move to the destination project directory.",
-                            (
-                                "Creates the workspace folder if missing; cwd fields "
-                                "and history project entries are updated."
-                            ),
-                        ],
-                        confirm_verb="Move",
+                        title=("Copy to other agent" if is_cross else title),
+                        warnings=warnings,
+                        confirm_verb=("Copy" if is_cross else "Move"),
                     ),
                     _after_confirm,
                 )
@@ -2370,7 +2441,11 @@ class SessionManagerApp(App[None]):
             self.push_screen(
                 MoveTargetScreen(
                     title,
-                    self._move_choices(exclude_slugs=exclude, provider_name=pname),
+                    self._move_choices(
+                        exclude_slugs=exclude,
+                        provider_name=pname,
+                        any_provider=cross,
+                    ),
                     hint,
                 ),
                 _after_dest,

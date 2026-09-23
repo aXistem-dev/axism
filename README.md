@@ -133,6 +133,8 @@ axism move --project -home-alice-src-demo --to /home/alice/src/other --dry-run
 axism move --project /home/alice/src/demo --to /home/alice/src/other --memory-agent auto
 axism move --project /home/alice/src/demo --to /home/alice/src/other --memory-agent claude --memory-agent-force
 axism move --project /home/alice/src/demo --to /home/alice/src/other --no-merge-memory
+axism export <session-uuid> --to-provider hermes --to /home/alice/src/demo
+axism export <session-uuid> --to-provider cursor --to /home/alice/src/other --dry-run
 axism delete <session-uuid> --dry-run
 axism delete <uuid-a> <uuid-b> --yes
 axism delete-project /home/alice/src/demo --dry-run
@@ -149,7 +151,7 @@ axism --provider cursor list
 axism --provider hermes show <session-id>
 ```
 
-TUI **Settings** (`,`) stores which backends are included (`enabled`), the CLI default (`active_provider`), and optional per-backend config dirs in `~/.config/axism/settings.json` (or `$AXISM_CONFIG_DIR`). The TUI and `axism list` merge every enabled backend; `--provider` scopes one CLI command to a single backend; `--config-dir` overrides that backend's root. Move/delete stay within one agent tool — mixed marks are refused.
+TUI **Settings** (`,`) stores which backends are included (`enabled`), the CLI default (`active_provider`), and optional per-backend config dirs in `~/.config/axism/settings.json` (or `$AXISM_CONFIG_DIR`). The TUI and `axism list` merge every enabled backend; `--provider` scopes one CLI command to a single backend; `--config-dir` overrides that backend's root. Same-agent move/delete refuse mixed marks. Session **move** to another agent copies text turns (source kept); use `axism export` for the same from the CLI.
 
 ## Backend differences
 

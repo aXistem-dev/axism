@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Provider `Capabilities`, so keys a backend cannot perform report instead of failing
 - Federated inventory: enable multiple backends in Settings; TUI and `axism list` show them together with an **Agent** column when more than one is active
 - `providers/federation.py` helpers and composite `provider:id` keys for marks/live maps
+- Cross-agent session copy (beta): TUI move to another agent, or `axism export <id> --to-provider … --to /cwd` (text turns; source kept)
 - Publish tagged releases to PyPI via GitHub Actions Trusted Publisher (OIDC)
 - Project homepage / repository / issues URLs in package metadata
 

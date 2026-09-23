@@ -300,6 +300,47 @@ def cmd_rename(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def cmd_export(args: argparse.Namespace) -> int:
+    """Copy a session into another agent tool (text turns; source kept)."""
+    from axism.providers.transfer import transfer_session
+
+    source = _provider(args)
+    found = source.find_session(args.session_id)
+    if not found:
+        # Search all enabled backends when --provider was not set.
+        if not getattr(args, "provider", None):
+            for provider in enabled_providers_from_settings(load_settings()):
+                found = provider.find_session(args.session_id)
+                if found:
+                    source = provider
+                    break
+    if not found:
+        print(f"Session not found: {args.session_id}", file=sys.stderr)
+        return 1
+    _proj, sess = found
+    sess.provider = source.name
+    try:
+        dest = get_provider(args.to_provider, config_dir=args.to_config_dir or None)
+    except KeyError:
+        print(f"Unknown destination provider: {args.to_provider}", file=sys.stderr)
+        return 1
+    if dest.name == source.name:
+        print(
+            "Destination provider matches source — use `axism move` to relocate.",
+            file=sys.stderr,
+        )
+        return 1
+    result = transfer_session(
+        source, dest, sess, args.to, dry_run=args.dry_run
+    )
+    for line in result.actions:
+        print(f"# {line}")
+    print(result.message)
+    if result.new_session_id:
+        print(f"new_session_id: {result.new_session_id}")
+    return 0 if result.ok else 1
+
+
 def cmd_move(args: argparse.Namespace) -> int:
     provider = _provider(args)
     root = provider.config_root()
@@ -559,6 +600,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="Hand off even when memory merge exceeds size/complexity limits",
     )
     move.set_defaults(func=cmd_move)
+
+    export = sub.add_parser(
+        "export",
+        help="Copy a session into another agent tool (text turns; source kept)",
+        parents=[common],
+    )
+    export.add_argument("session_id", help="Source session id or unique prefix")
+    export.add_argument(
+        "--to-provider",
+        required=True,
+        choices=sorted(PROVIDER_LABELS),
+        help="Destination agent backend",
+    )
+    export.add_argument(
+        "--to",
+        required=True,
+        help="Destination absolute cwd (project path under the dest agent)",
+    )
+    export.add_argument(
+        "--to-config-dir",
+        default=None,
+        help="Override destination provider config root",
+    )
+    export.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show plan without writing",
+    )
+    export.set_defaults(func=cmd_export)
 
     delete = sub.add_parser(
         "delete",
