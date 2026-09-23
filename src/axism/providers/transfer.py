@@ -369,14 +369,41 @@ def _write_cursor_agent_jsonl(
     return new_id, path
 
 
-def _write_temp_claude_for_hermes(canonical: CanonicalTranscript) -> Path:
+def _parse_hermes_import_id(output: str) -> str:
+    """Pull the new Hermes session id out of ``hermes sessions import`` output."""
+    # e.g. "Imported Claude Code session as 20260923_114611_63d9b7"
+    match = re.search(
+        r"(?:session as|resume)\s+(\d{8}_\d{6}_[0-9a-f]+)",
+        output,
+        re.IGNORECASE,
+    )
+    if match:
+        return match.group(1)
+    match = re.search(r"\b(\d{8}_\d{6}_[0-9a-f]+)\b", output)
+    return match.group(1) if match else ""
+
+
+def _write_temp_claude_for_hermes(
+    canonical: CanonicalTranscript, dest_cwd: str
+) -> Path:
+    """Write a Claude-shaped JSONL for ``hermes sessions import``.
+
+    ``dest_cwd`` is forced into every record so Hermes groups the session under
+    the destination workspace the user picked (not the source transcript cwd).
+    """
     tmp = Path(tempfile.mkdtemp(prefix="axism-import-"))
-    # Reuse Claude writer against a fake root by writing directly.
     fake_root = tmp / "claude-home"
     fake_root.mkdir()
-    cwd = canonical.cwd or str(tmp / "workspace")
-    new_id, written = _write_claude_jsonl(fake_root, cwd, canonical)
-    # Flat path for hermes import path arg
+    cwd = normalize_dest_cwd(dest_cwd) or dest_cwd or canonical.cwd or str(tmp / "workspace")
+    # Stamp dest into the canonical so titles/metadata stay coherent.
+    stamped = CanonicalTranscript(
+        title=canonical.title,
+        cwd=cwd,
+        source_provider=canonical.source_provider,
+        source_session_id=canonical.source_session_id,
+        turns=list(canonical.turns),
+    )
+    new_id, written = _write_claude_jsonl(fake_root, cwd, stamped)
     flat = tmp / f"{new_id}.jsonl"
     flat.write_text(written.read_text(encoding="utf-8"), encoding="utf-8")
     return flat
@@ -433,7 +460,7 @@ def import_to_provider(
             )
         if dest.name == "hermes":
             # Prefer native Claude file import when source path is Claude JSONL.
-            src_path = _write_temp_claude_for_hermes(canonical)
+            src_path = _write_temp_claude_for_hermes(canonical, dest_cwd)
             tmp_root = src_path.parent
             try:
                 rc, out = hermes_ops.run_hermes(
@@ -454,10 +481,22 @@ def import_to_provider(
                     dest_cwd=dest_cwd,
                 )
             actions.append(out or "hermes import ok")
+            actions.append(f"workspace cwd={dest_cwd}")
+            new_id = _parse_hermes_import_id(out or "")
+            if new_id and canonical.title.strip():
+                ok, msg = hermes_ops.rename_session(
+                    dest.config_root(), new_id, canonical.title.strip()[:200]
+                )
+                actions.append(msg if ok else f"title note: {msg}")
             return TransferResult(
                 ok=True,
-                message=f"Imported into Hermes ({out or 'ok'}; text turns / tools collapsed)",
+                message=(
+                    f"Imported into Hermes under {dest_cwd}"
+                    + (f" as {new_id}" if new_id else "")
+                    + f" ({(out or 'ok').splitlines()[0]}; text turns / tools collapsed)"
+                ),
                 actions=actions,
+                new_session_id=new_id or "",
                 dest_provider=dest.name,
                 dest_cwd=dest_cwd,
             )
@@ -486,25 +525,49 @@ def transfer_session(
     dest_cwd: str,
     *,
     dry_run: bool = False,
+    title: str | None = None,
+    allow_same_provider: bool = False,
 ) -> TransferResult:
-    """Copy ``session`` from ``source`` into ``dest`` under ``dest_cwd``."""
-    if source.name == dest.name:
+    """Copy ``session`` from ``source`` into ``dest`` under ``dest_cwd``.
+
+    Set ``allow_same_provider=True`` for same-agent duplicates (Copy).
+    Optional ``title`` overrides the destination session title.
+    """
+    if source.name == dest.name and not allow_same_provider:
         return TransferResult(
             ok=False,
-            message="Source and destination agent are the same — use Move instead",
+            message="Source and destination agent are the same — use Move or Copy",
             dest_provider=dest.name,
             dest_cwd=dest_cwd,
         )
     canonical = export_session(source, session)
+    if title and title.strip():
+        canonical.title = title.strip()
+    elif allow_same_provider and source.name == dest.name:
+        # Same-agent duplicate: make the copy obvious if title unchanged.
+        base = canonical.title.strip() or session.display_title
+        if not base.endswith(" (copy)"):
+            canonical.title = f"{base} (copy)"
     if not canonical.turns and source.name != "hermes":
-        # Still allow import of title-only stub
         canonical.turns = [
             Turn(
                 role="user",
                 content=f"(No transcript turns found for {session.session_id})",
             )
         ]
-    return import_to_provider(dest, canonical, dest_cwd, dry_run=dry_run)
+    result = import_to_provider(dest, canonical, dest_cwd, dry_run=dry_run)
+    if (
+        result.ok
+        and not dry_run
+        and result.new_session_id
+        and title
+        and title.strip()
+        and dest.capabilities.rename
+    ):
+        # Reinforce title for backends that store it outside the transcript seed.
+        ok, msg = dest.rename(result.new_session_id, title.strip())
+        result.actions.append(msg if ok else f"title note: {msg}")
+    return result
 
 
 def transfer_sessions(
@@ -514,14 +577,24 @@ def transfer_sessions(
     dest_cwd: str,
     *,
     dry_run: bool = False,
+    title: str | None = None,
+    allow_same_provider: bool = False,
 ) -> TransferResult:
     if not sessions:
         return TransferResult(ok=False, message="No sessions to transfer")
     actions: list[str] = []
     ids: list[str] = []
-    for session in sessions:
+    for i, session in enumerate(sessions):
+        # Only apply an explicit title to a single-session copy.
+        sess_title = title if len(sessions) == 1 else None
         result = transfer_session(
-            source, dest, session, dest_cwd, dry_run=dry_run
+            source,
+            dest,
+            session,
+            dest_cwd,
+            dry_run=dry_run,
+            title=sess_title,
+            allow_same_provider=allow_same_provider,
         )
         actions.extend(result.actions)
         if not result.ok:
@@ -535,11 +608,33 @@ def transfer_sessions(
         if result.new_session_id:
             ids.append(result.new_session_id)
     n = len(sessions)
+    verb = "Copied"
     return TransferResult(
         ok=True,
-        message=f"Copied {n} session{'s' if n != 1 else ''} to {dest.label}",
+        message=f"{verb} {n} session{'s' if n != 1 else ''} to {dest.label}",
         actions=actions,
         new_session_id=ids[0] if len(ids) == 1 else "",
         dest_provider=dest.name,
         dest_cwd=normalize_dest_cwd(dest_cwd) or dest_cwd,
+    )
+
+
+def copy_sessions(
+    source: SessionProvider,
+    dest: SessionProvider,
+    sessions: list[SessionMeta],
+    dest_cwd: str,
+    *,
+    dry_run: bool = False,
+    title: str | None = None,
+) -> TransferResult:
+    """Duplicate sessions into ``dest`` (same or other agent); source kept."""
+    return transfer_sessions(
+        source,
+        dest,
+        sessions,
+        dest_cwd,
+        dry_run=dry_run,
+        title=title,
+        allow_same_provider=True,
     )
