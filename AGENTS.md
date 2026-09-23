@@ -32,6 +32,8 @@ src/axism/
     base.py           # SessionProvider protocol, Capabilities, ProviderBase
     common.py         # shared helpers for filesystem-backed backends
     __init__.py       # registry: PROVIDER_LABELS + get_provider
+    federation.py     # multi-backend inventory, composite provider:id keys
+    transfer.py       # cross-agent session copy (export)
     claude_code.py    # wraps the top-level modules above
     cursor.py + cursor_store/     # ~/.cursor agent transcripts + CLI SQLite chats
     hermes.py + hermes_store/     # ~/.hermes state.db, mutations via the hermes CLI
@@ -70,6 +72,10 @@ uv run axism --help
 uv tool install --force .
 ```
 
+## Contributing
+
+Fork the repo, branch off `main`, and open a pull request against `main`. CI (pytest, ruff, anonymity check) runs on every PR. `main` is the single integration branch; there is no long-lived `dev` branch to target or keep in sync. A maintainer merges the PR once it's green, then decides separately when to cut a release (see Versioning & release below) — merging to `main` and releasing are independent steps.
+
 ## Versioning & release
 
 Bump **all** of:
@@ -81,6 +87,14 @@ Bump **all** of:
 | `CHANGELOG.md` | move `[Unreleased]` → `## [X.Y.Z] — YYYY-MM-DD`; leave empty `[Unreleased]` |
 
 Tag `v*` (e.g. `v0.1.0`) to trigger `.github/workflows/release.yml` (GitHub Release assets + PyPI). Keep docs forge-agnostic (no hardcoded private hosts).
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+- **CI** (`.github/workflows/ci.yml`): pytest, ruff, anonymity check; works on GitHub Actions and Forgejo/Gitea/Codeberg Actions.
+- **Release** (`.github/workflows/release.yml`): on tag `v*`, builds wheel/sdist, uploads GitHub release assets, and publishes to PyPI via Trusted Publisher (OIDC).
 
 ## Commits
 
