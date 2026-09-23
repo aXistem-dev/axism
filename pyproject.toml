@@ -1,6 +1,6 @@
 [project]
 name = "axism"
-version = "0.1.0"
+version = "0.1.1"
 description = "aXism — Agent Interactive Session Manager (TUI + CLI)"
 readme = "README.md"
 license = { text = "MIT" }

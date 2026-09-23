@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-09-23
+
 ### Added
 
 - Cursor provider: IDE agent transcripts (`~/.cursor/projects/<slug>/agent-transcripts/`) and CLI chats (`~/.cursor/chats/<md5-cwd>/<id>/`, both the SQLite and JSON-sidecar shapes), with open, stop, rename, move, and delete
@@ -33,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - CI pytest collection (`pythonpath` includes project root so `tests.*` imports resolve)
+- Cross-agent transfer into Claude Code now writes `customTitle` so the transferred session keeps its title
+- Hermes delete stops a live session's process before deleting it, matching Claude Code and Cursor
+- Cursor delete now blocks on a genuinely running `cursor-agent` process instead of never blocking
+- Cursor session move no longer reports failure when a session is already at the destination
 
 ## [0.1.0] — 2026-09-19
 
