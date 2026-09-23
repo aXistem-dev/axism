@@ -15,9 +15,17 @@ from pathlib import Path
 STATE_DB = "state.db"
 HOME_MARKERS = ("config.yaml", ".env", STATE_DB)
 
-# Interactive chats. Cron jobs, kanban workers, and messaging platforms are
-# machine traffic rather than sessions a user browses.
-DEFAULT_SOURCES = ("cli", "tui", "desktop", "webui")
+# Interactive + imported chats. Cron, messaging platforms, and kanban workers
+# stay out of the default inventory (see AGENTS.md extras branches).
+DEFAULT_SOURCES = (
+    "cli",
+    "tui",
+    "desktop",
+    "webui",
+    "oneshot",
+    "claude-code",  # hermes sessions import --from claude
+    "codex",  # hermes sessions import --from codex
+)
 
 
 def hermes_home() -> Path:

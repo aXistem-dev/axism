@@ -386,7 +386,7 @@ HELP_LEGEND = """[b $accent]aXism keys[/]
   Esc               Clear filter (when filter focused)
 
 [b $primary]Move[/]
-  m / M             Projects: move project(s) · Sessions/Detail: move/copy session(s)
+  m / M             Projects: move project(s) · Sessions/Detail: move session(s)
                     pick existing project or type a destination path
                     (same agent relocates; other agent copies text turns, source kept)
                     (Tab path field · project merges include memory/)
@@ -458,25 +458,36 @@ class VersionScreen(ModalScreen[None]):
 
 
 class RenameSessionScreen(ModalScreen[str | None]):
-    """Prompt for a new session title."""
+    """Prompt for a new session title (rename or copy-as)."""
 
     BINDINGS = [
         Binding("escape", "cancel", "Cancel", show=True, priority=True),
         Binding("enter", "apply", "Apply", show=True, priority=True),
     ]
 
-    def __init__(self, current_title: str, session_short: str) -> None:
+    def __init__(
+        self,
+        current_title: str,
+        session_short: str,
+        *,
+        heading: str = "Rename session",
+        hint: str = "Enter a new title for this session",
+        allow_empty: bool = False,
+    ) -> None:
         super().__init__()
         self.current_title = current_title
         self.session_short = session_short
+        self.heading = heading
+        self.hint = hint
+        self.allow_empty = allow_empty
 
     def compose(self) -> ComposeResult:
         yield Vertical(
             Static(
-                f"[b]Rename session[/b]  {self.session_short}…",
+                f"[b]{self.heading}[/b]  {self.session_short}…",
                 id="rename-title",
             ),
-            Static("Enter a new title for this session", id="rename-hint"),
+            Static(self.hint, id="rename-hint"),
             Input(
                 value=self.current_title,
                 placeholder="Session title",
@@ -493,7 +504,12 @@ class RenameSessionScreen(ModalScreen[str | None]):
 
     def action_apply(self) -> None:
         value = self.query_one("#rename-input", Input).value.strip()
-        self.dismiss(value if value else None)
+        if value:
+            self.dismiss(value)
+        elif self.allow_empty:
+            self.dismiss(self.current_title or None)
+        else:
+            self.dismiss(None)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -501,7 +517,12 @@ class RenameSessionScreen(ModalScreen[str | None]):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         event.stop()
         value = event.value.strip()
-        self.dismiss(value if value else None)
+        if value:
+            self.dismiss(value)
+        elif self.allow_empty:
+            self.dismiss(self.current_title or None)
+        else:
+            self.dismiss(None)
 
 
 class ThemePickerScreen(ModalScreen[str | None]):
