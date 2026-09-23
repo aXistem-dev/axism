@@ -30,6 +30,8 @@ class SessionMeta:
     subagent_count: int = 0
     has_bridge: bool = False
     entrypoint: str | None = None
+    # Set when federating multiple backends; None in single-provider discovery.
+    provider: str | None = None
 
     @property
     def display_title(self) -> str:
@@ -39,6 +41,13 @@ class SessionMeta:
     def mtime_dt(self) -> datetime:
         return datetime.fromtimestamp(self.mtime, tz=UTC)
 
+    @property
+    def key(self) -> str:
+        """Stable id across backends: ``provider:session_id`` (or bare id)."""
+        if self.provider:
+            return f"{self.provider}:{self.session_id}"
+        return self.session_id
+
 
 @dataclass
 class ProjectInfo:
@@ -46,6 +55,7 @@ class ProjectInfo:
     cwd_guess: str
     path: Path
     sessions: list[SessionMeta] = field(default_factory=list)
+    provider: str | None = None
 
     @property
     def session_count(self) -> int:
@@ -54,6 +64,13 @@ class ProjectInfo:
     @property
     def total_bytes(self) -> int:
         return sum(s.size_bytes for s in self.sessions)
+
+    @property
+    def key(self) -> str:
+        """Stable id across backends: ``provider:slug`` (or bare slug)."""
+        if self.provider:
+            return f"{self.provider}:{self.slug}"
+        return self.slug
 
 
 def _extract_text_content(message: object) -> str | None:

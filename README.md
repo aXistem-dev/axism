@@ -23,7 +23,7 @@ Works on **Linux** and **macOS**, across three agent backends:
 | Cursor | `cursor` | `projects/<slug>/agent-transcripts/<id>/` and `chats/<md5-cwd>/<id>/` | `$CURSOR_DATA_DIR` or `~/.cursor` |
 | Hermes | `hermes` | `state.db` (`sessions` + `messages`) | `$HERMES_HOME` or `~/.hermes` |
 
-Pick one with Settings (`,`) in the TUI or `--provider` on the CLI.
+Enable any combination in Settings (`,`) in the TUI — Space includes a backend in the inventory; Enter sets the CLI default. Use `--provider` on the CLI to scope one command to a single backend.
 
 ## Features
 
@@ -36,7 +36,8 @@ Pick one with Settings (`,`) in the TUI or `--provider` on the CLI.
 - **Delete** is pane-aware: `d` on projects deletes projects; `d` on sessions deletes sessions (project delete confirm uses a stronger danger style)
 - Move projects or sessions to another project (pick existing or type a path)
 - Project moves merge `memory/` into the destination (colliding names get a `-from-<slug>` suffix; dual `MEMORY.md` can hand off to a local agent CLI)
-- Settings (`,`) for active provider and config directory (`~/.config/axism/settings.json`)
+- Settings (`,`) to include backends in the inventory and set config directories (`~/.config/axism/settings.json`)
+- When more than one agent is enabled, the projects pane shows an **Agent** column
 - Safe delete with confirm (stops live processes when deleting)
 - Header shows brand with version/commit beside it; `v` for runtime details
 - Sessions pane: `/` filter, `.` cycle sort (updated / title / size)
@@ -89,7 +90,8 @@ Actions are **pane-aware**. Most letter keys accept both cases (`a` / `A`, `q` /
 
 | Key | Projects pane | Sessions / detail |
 |-----|---------------|-------------------|
-| `Tab` / `←` / `→` | Switch pane | Switch pane |
+| `Tab` | Switch pane (detail → sessions → projects) | Same |
+| `Shift+Tab` / `←` / `→` | Switch pane (`←`/`→` spatial) | Same |
 | `↑` / `↓` | Move in list | Move in list |
 | `Space` | Mark project | Mark session (no-op on detail) |
 | `a` / `A` | Select all projects | Select all sessions in project |
@@ -104,7 +106,7 @@ Actions are **pane-aware**. Most letter keys accept both cases (`a` / `A`, `q` /
 | `r` / `R` | Refresh | Refresh |
 | `t` | Theme picker | Theme picker |
 | `T` | Cycle theme | Cycle theme |
-| `,` | Settings (provider + config dir) | Settings |
+| `,` | Settings (include agents + config dirs) | Settings |
 | `v` / `V` | Version details | Version details |
 | `?` / `h` | Help | Help |
 | `q` / `Q` | Quit | Quit |
@@ -147,7 +149,7 @@ axism --provider cursor list
 axism --provider hermes show <session-id>
 ```
 
-TUI **Settings** (`,`) stores the active provider and optional config dir in `~/.config/axism/settings.json` (or `$AXISM_CONFIG_DIR`) under `providers.<id>`. `--provider` overrides the saved choice for one command; `--config-dir` overrides that backend's root.
+TUI **Settings** (`,`) stores which backends are included (`enabled`), the CLI default (`active_provider`), and optional per-backend config dirs in `~/.config/axism/settings.json` (or `$AXISM_CONFIG_DIR`). The TUI and `axism list` merge every enabled backend; `--provider` scopes one CLI command to a single backend; `--config-dir` overrides that backend's root. Move/delete stay within one agent tool — mixed marks are refused.
 
 ## Backend differences
 
@@ -176,7 +178,7 @@ These stores are intentionally left alone:
 
 ## How it works
 
-aXism scans the active **provider** config root, maps each session id to its transcripts, jobs, subagents, caches, and live records, then lets you open, stop, rename, move, or delete those fragments without touching protected global state. The TUI and CLI only ever call the provider interface in [`src/axism/providers/base.py`](src/axism/providers/base.py); each backend owns its own layout under `providers/<name>_store/`.
+aXism scans every **enabled** provider config root, maps each session id to its transcripts, jobs, subagents, caches, and live records (namespaced per backend), then lets you open, stop, rename, move, or delete those fragments without touching protected global state. The TUI and CLI only ever call the provider interface in [`src/axism/providers/base.py`](src/axism/providers/base.py); each backend owns its own layout under `providers/<name>_store/`.
 
 Claude Code's tree:
 

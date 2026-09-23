@@ -13,7 +13,11 @@ from axism.providers import (
     PROVIDER_LABELS,
     SessionProvider,
     UnsupportedOperation,
+    enabled_providers_from_settings,
+    federate_discover,
+    federate_merge_live,
     get_provider,
+    live_for_session,
     provider_from_settings,
 )
 from axism.settings import load_settings
@@ -41,21 +45,39 @@ def _provider(args: argparse.Namespace) -> SessionProvider:
 
 
 def cmd_list(args: argparse.Namespace) -> int:
-    provider = _provider(args)
-    root = provider.config_root()
-    projects = provider.discover()
+    """List sessions. Without ``--provider``, merges every enabled backend."""
+    use_cli = not getattr(args, "no_cli", False)
+    if getattr(args, "provider", None) or getattr(args, "config_dir", None):
+        provider = _provider(args)
+        root = provider.config_root()
+        projects = provider.discover()
+        for p in projects:
+            p.provider = provider.name
+            for s in p.sessions:
+                s.provider = provider.name
+        live_map = {
+            f"{provider.name}:{sid}": lv
+            for sid, lv in provider.merge_live(use_cli=use_cli).items()
+        }
+        providers_note = provider.label
+    else:
+        providers = enabled_providers_from_settings(load_settings())
+        projects = federate_discover(providers)
+        live_map = federate_merge_live(providers, use_cli=use_cli)
+        root = " · ".join(str(p.config_root()) for p in providers)
+        providers_note = ", ".join(p.label for p in providers)
+
     if args.project:
         projects = filter_projects_by_cwd(projects, args.project)
-    live = provider.merge_live(use_cli=not args.no_cli)
 
     if args.json:
         payload = []
         for p in projects:
             for s in p.sessions:
-                lv = live.get(s.session_id)
+                lv = live_for_session(live_map, s)
                 payload.append(
                     {
-                        "provider": provider.name,
+                        "provider": s.provider or p.provider,
                         "session_id": s.session_id,
                         "project_slug": s.project_slug,
                         "cwd": s.cwd,
@@ -77,13 +99,15 @@ def cmd_list(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2))
         return 0
 
+    print(f"# providers: {providers_note}")
     for p in projects:
+        agent = p.provider or "?"
         print(
-            f"\n{p.cwd_guess}  ({p.slug})  sessions={p.session_count}  "
+            f"\n[{agent}] {p.cwd_guess}  ({p.slug})  sessions={p.session_count}  "
             f"{_fmt_size(p.total_bytes)}"
         )
         for s in p.sessions:
-            lv = live.get(s.session_id)
+            lv = live_for_session(live_map, s)
             tags = []
             if lv:
                 tags.append(lv.kind)

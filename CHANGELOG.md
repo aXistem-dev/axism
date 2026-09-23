@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hermes provider: interactive sessions from `~/.hermes/state.db`, opened with `hermes --resume` and mutated through `hermes sessions`
 - `--provider` flag and `axism providers` command
 - Provider `Capabilities`, so keys a backend cannot perform report instead of failing
+- Federated inventory: enable multiple backends in Settings; TUI and `axism list` show them together with an **Agent** column when more than one is active
+- `providers/federation.py` helpers and composite `provider:id` keys for marks/live maps
 - Publish tagged releases to PyPI via GitHub Actions Trusted Publisher (OIDC)
 - Project homepage / repository / issues URLs in package metadata
 
@@ -21,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SessionProvider` covers discovery, liveness, open/stop, fragments, rename, move, and delete; the TUI and CLI no longer reach into Claude Code's modules directly
 - `--config-dir` overrides the active provider's root instead of always setting `$CLAUDE_CONFIG_DIR`
 - Credentials, agent config files, and backend databases are protected for every provider
+- Settings Space = include in inventory; Enter = CLI default (`active_provider`)
+- Move/delete refuse mixed-agent selections; destinations stay within the same agent tool
+- Sessions filter/sort chrome sits under the sessions table; Tab cycles detail → sessions → projects
+- Header shows full brand + version without mid-name ellipsis
 
 ### Fixed
 
