@@ -281,8 +281,7 @@ def _write_claude_jsonl(
     emit(
         {
             "type": "custom-title",
-            "title": canonical.title[:200],
-            "message": {"content": canonical.title[:200]},
+            "customTitle": canonical.title[:200],
         }
     )
     for turn in canonical.turns:

@@ -99,6 +99,15 @@ def process_table() -> list[tuple[int, str]]:
     return rows
 
 
+def exec_with_cwd(argv: list[str], workdir: str | None) -> None:
+    """Chdir into ``workdir`` (if it exists) then replace this process with ``argv``."""
+    if workdir:
+        path = Path(workdir).expanduser()
+        if path.is_dir():
+            os.chdir(path)
+    os.execvp(argv[0], argv)
+
+
 def find_agent_sessions(
     session_ids: set[str], binaries: set[str]
 ) -> dict[str, int]:
