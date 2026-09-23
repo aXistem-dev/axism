@@ -1,3 +1,5 @@
+![aXism](https://raw.githubusercontent.com/aXistem-dev/axism/main/aXism-BANNER.png)
+
 # aXism
 
 **Agent Interactive Session Manager.** Browse, open, and clean up the chat sessions your coding agents keep on disk, across every project on your machine.
