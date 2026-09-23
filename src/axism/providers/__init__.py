@@ -11,6 +11,15 @@ from axism.providers.base import (
     UnsupportedOperation,
 )
 from axism.providers.claude_code import ClaudeCodeProvider, default_provider
+from axism.providers.federation import (
+    enabled_providers_from_settings,
+    federate_discover,
+    federate_merge_live,
+    live_for_session,
+    provider_by_name,
+    roots_summary,
+    tag_provider,
+)
 from axism.settings import DEFAULT_PROVIDER, Settings, load_settings
 
 # Display names for known backends, in menu order.
@@ -28,10 +37,17 @@ __all__ = [
     "SessionProvider",
     "UnsupportedOperation",
     "default_provider",
+    "enabled_providers_from_settings",
+    "federate_discover",
+    "federate_merge_live",
     "get_provider",
     "list_provider_ids",
+    "live_for_session",
+    "provider_by_name",
     "provider_config_hint",
     "provider_from_settings",
+    "roots_summary",
+    "tag_provider",
 ]
 
 

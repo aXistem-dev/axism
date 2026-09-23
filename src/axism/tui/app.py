@@ -24,9 +24,14 @@ from axism.move import MoveResult
 from axism.providers import (
     PROVIDER_LABELS,
     UnsupportedOperation,
+    enabled_providers_from_settings,
+    federate_discover,
+    federate_merge_live,
     get_provider,
+    live_for_session,
+    provider_by_name,
     provider_config_hint,
-    provider_from_settings,
+    roots_summary,
 )
 from axism.settings import (
     DEFAULT_PROVIDER,
@@ -41,7 +46,9 @@ from axism.settings import (
 MARK_ON = "☑"
 MARK_OFF = "☐"
 
-APP_BRAND = "aXism - Agent Interactive Session Manager"
+APP_NAME = "aXism"
+APP_TAGLINE = "Agent Interactive Session Manager"
+APP_BRAND = f"{APP_NAME} - {APP_TAGLINE}"
 
 # Dense operational terminal look — one muted teal voice, near-black ground.
 # High-contrast chrome so header/footer stay readable on common terminals.
@@ -90,9 +97,32 @@ class AxisHeader(Widget):
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="header-left"):
-            yield Static(APP_BRAND, id="header-brand")
-            yield Static(f"v{version_string()}", id="header-version")
+            yield Static(self._label_for_width(120), id="header-brand")
         yield HeaderClock() if self._show_clock else HeaderClockSpace()
+
+    def on_mount(self) -> None:
+        self._sync_brand()
+
+    def on_resize(self) -> None:
+        self._sync_brand()
+
+    def _label_for_width(self, width: int) -> str:
+        """Prefer the full brand; never ellipsize mid-name — drop the tagline first."""
+        ver = f"v{version_string()}"
+        full = f"{APP_BRAND}  {ver}"
+        short = f"{APP_NAME}  {ver}"
+        # Leave room for clock (~10) and padding.
+        budget = max(8, width - 12)
+        if len(full) <= budget:
+            return full
+        return short
+
+    def _sync_brand(self) -> None:
+        try:
+            brand = self.query_one("#header-brand", Static)
+        except Exception:
+            return
+        brand.update(self._label_for_width(self.size.width))
 
 
 def _fmt_size(n: int) -> str:
@@ -337,7 +367,8 @@ class ConfirmDeleteScreen(ModalScreen[bool]):
 HELP_LEGEND = """[b $accent]aXism keys[/]
 
 [b $primary]Navigate[/]
-  Tab / ← / →       Switch pane focus (projects → sessions → detail)
+  Tab               Switch pane focus (detail → sessions → projects)
+  ← / →             Switch pane focus (spatial left / right)
   ↑ ↓               Move within a list
 
 [b $primary]Select[/] [dim](pane-aware)[/]
@@ -367,7 +398,7 @@ HELP_LEGEND = """[b $accent]aXism keys[/]
   r / R             Refresh session list
   t                 Theme picker
   T                 Cycle theme
-  ,                 Settings (provider + config dir)
+  ,                 Settings (include agents + config dirs)
   v / V             Version details
   ? / h             Help (this legend)
   q / Q             Quit
@@ -528,7 +559,7 @@ class ThemePickerScreen(ModalScreen[str | None]):
 
 
 class SettingsScreen(ModalScreen[Settings | None]):
-    """Choose active provider and per-provider config directory."""
+    """Choose which backends to include, active default, and config dirs."""
 
     BINDINGS = [
         Binding("escape", "cancel", "Cancel", show=True, priority=True),
@@ -564,10 +595,10 @@ class SettingsScreen(ModalScreen[Settings | None]):
         prefs = self._settings.provider_prefs(active)
         path_value = self._config_dirs.get(active) or prefs.config_dir or ""
         yield Vertical(
-            Static("[b]Settings[/]  ·  provider + config dir", id="settings-title"),
+            Static("[b]Settings[/]  ·  providers + config dirs", id="settings-title"),
             Static(
-                "Enter activates the highlighted backend; Space enables or "
-                "disables it in the list.",
+                "Space includes a backend in the inventory. Enter sets the "
+                "highlighted one as the CLI default (→).",
                 id="settings-hint",
             ),
             OptionList(*options, id="settings-providers"),
@@ -582,7 +613,7 @@ class SettingsScreen(ModalScreen[Settings | None]):
             ),
             Static(
                 f"[$text-muted]Saved at {settings_path()}[/]\n"
-                "↑↓ provider · Space enable · Tab path · Enter save · Esc cancel",
+                "↑↓ provider · Space include · Tab path · Enter save · Esc cancel",
                 id="settings-footer",
             ),
             id="settings-dialog",
@@ -829,45 +860,40 @@ class SessionManagerApp(App[None]):
         layout: vertical;
         background: $background;
     }
-    /* height:1 — no borders here; tall borders consume the only row and hide text */
+    /* Two rows so the brand reads larger; no borders (they eat the content row). */
     AxisHeader {
         dock: top;
         width: 100%;
-        height: 1;
+        height: 2;
         background: #1a1f2a;
         color: #e8eef5;
     }
     AxisHeader #header-left {
         dock: left;
-        width: auto;
-        max-width: 85%;
-        height: 1;
+        width: 1fr;
+        height: 2;
         layout: horizontal;
         background: #1a1f2a;
+        align: left middle;
     }
     AxisHeader #header-brand {
         width: auto;
-        max-width: 70%;
-        padding: 0 0 0 1;
+        height: 1;
+        padding: 0 1;
         color: #e8eef5;
         background: #1a1f2a;
         text-style: bold;
         text-wrap: nowrap;
-        text-overflow: ellipsis;
-        text-opacity: 100%;
-    }
-    AxisHeader #header-version {
-        width: auto;
-        padding: 0 1;
-        color: #a8b8c8;
-        background: #1a1f2a;
-        text-wrap: nowrap;
+        text-overflow: clip;
         text-opacity: 100%;
     }
     AxisHeader HeaderClock {
+        dock: right;
+        height: 2;
         color: #a8b8c8;
         background: #1a1f2a;
         text-opacity: 100%;
+        content-align: right middle;
     }
     #body {
         height: 1fr;
@@ -876,6 +902,7 @@ class SessionManagerApp(App[None]):
     #projects, #sessions-pane, #detail {
         background: $surface;
         border: solid $panel;
+        border-title-style: bold;
     }
     #projects.-focused, #sessions-pane.-focused, #detail.-focused {
         border: solid $accent;
@@ -887,6 +914,16 @@ class SessionManagerApp(App[None]):
     #sessions-pane {
         width: 50%;
         layout: vertical;
+    }
+    #sessions {
+        height: 1fr;
+        border: none;
+        border-bottom: solid $panel;
+        background: $surface;
+    }
+    #sessions-pane.-focused #sessions {
+        border-bottom: solid $accent 25%;
+        background: $boost;
     }
     #sessions-meta {
         height: 1;
@@ -909,16 +946,6 @@ class SessionManagerApp(App[None]):
     #sessions-filter:focus {
         background: $boost;
         color: $foreground;
-    }
-    #sessions {
-        height: 1fr;
-        border: none;
-        border-top: solid $panel;
-        background: $surface;
-    }
-    #sessions-pane.-focused #sessions {
-        border-top: solid $accent 25%;
-        background: $boost;
     }
     #detail {
         width: 1fr;
@@ -1110,7 +1137,9 @@ class SessionManagerApp(App[None]):
 
     # Footer: essentials only. Full legend via ? / h. Settings (,) for provider/config.
     BINDINGS = [
-        Binding("tab", "focus_next", "Pane", show=True),
+        # Tab cycles right→left (detail → sessions → projects); arrows stay spatial.
+        Binding("tab", "focus_previous", "Pane", show=True),
+        Binding("shift+tab", "focus_next", "Pane", show=False),
         Binding("right", "focus_next", "Pane", show=False, priority=True),
         Binding("left", "focus_previous", "Pane", show=False, priority=True),
         Binding("space", "toggle_select", "Select", show=True),
@@ -1147,30 +1176,36 @@ class SessionManagerApp(App[None]):
     def __init__(self) -> None:
         super().__init__()
         self._axism_settings = load_settings()
-        self.provider = provider_from_settings(self._axism_settings)
+        self.providers = enabled_providers_from_settings(self._axism_settings)
+        self.provider = (
+            provider_by_name(self.providers, self._axism_settings.active_provider)
+            or self.providers[0]
+        )
         self.root = self.provider.config_root()
         self.projects: list[ProjectInfo] = []
         self.live: dict[str, LiveSession] = {}
         self.selected_project: ProjectInfo | None = None
         self.selected_session: SessionMeta | None = None
+        # Composite keys: provider:slug / provider:session_id when federated.
         self.selected_session_ids: set[str] = set()
         self.selected_project_slugs: set[str] = set()
         self._toast_timer: Timer | None = None
         self._theme_names: list[str] = []
         self._session_filter = ""
         self._session_sort = SESSION_SORT_MODES[0][0]
+        self._projects_have_agent_col = False
 
     def compose(self) -> ComposeResult:
         yield AxisHeader(show_clock=True)
         with Horizontal(id="body"):
             yield DataTable(id="projects", cursor_type="row")
             with Vertical(id="sessions-pane"):
+                yield DataTable(id="sessions", cursor_type="row")
                 yield Static("", id="sessions-meta")
                 yield Input(
                     placeholder="/ filter · . sort",
                     id="sessions-filter",
                 )
-                yield DataTable(id="sessions", cursor_type="row")
             yield Static("Select a session  ·  ? help", id="detail")
         yield Static("", id="status")
         yield Static("", id="toast")
@@ -1181,21 +1216,49 @@ class SessionManagerApp(App[None]):
         if "axism" in self.available_themes:
             self.theme = "axism"
         # Title/subtitle are for OS chrome; AxisHeader paints the visible bar.
-        self.title = APP_BRAND
-        self.sub_title = f"v{version_string()}"
+        self.title = f"{APP_BRAND}  v{version_string()}"
+        self.sub_title = ""
         self._theme_names = sorted(self.available_themes.keys())
         proj_table = self.query_one("#projects", DataTable)
-        proj_table.border_title = "projects"
-        proj_table.add_columns("Sel", "Project", "Sessions", "Size")
+        proj_table.border_title = "Projects"
+        self._setup_projects_columns()
         sess_pane = self.query_one("#sessions-pane", Vertical)
-        sess_pane.border_title = "sessions"
+        sess_pane.border_title = "Sessions"
         sess_table = self.query_one("#sessions", DataTable)
         sess_table.add_columns("Sel", "Title", "Updated", "Size", "Tags")
         detail = self.query_one("#detail", Static)
-        detail.border_title = "detail"
+        detail.border_title = "Detail"
         self.theme_changed_signal.subscribe(self, self._on_theme_changed)
         self._sync_pane_focus_classes()
         self.action_refresh()
+
+    def _multi_agent(self) -> bool:
+        return len(self.providers) > 1
+
+    def _agent_label(self, name: str | None) -> str:
+        if not name:
+            return "?"
+        return PROVIDER_LABELS.get(name, name)
+
+    def _provider_for_project(self, project: ProjectInfo):
+        found = provider_by_name(self.providers, project.provider)
+        return found or self.provider
+
+    def _provider_for_session(self, session: SessionMeta):
+        found = provider_by_name(self.providers, session.provider)
+        return found or self.provider
+
+    def _setup_projects_columns(self) -> None:
+        table = self.query_one("#projects", DataTable)
+        want_agent = self._multi_agent()
+        if table.columns and self._projects_have_agent_col == want_agent:
+            return
+        table.clear(columns=True)
+        if want_agent:
+            table.add_columns("Sel", "Agent", "Project", "Sessions", "Size")
+        else:
+            table.add_columns("Sel", "Project", "Sessions", "Size")
+        self._projects_have_agent_col = want_agent
 
     def _on_theme_changed(self, _theme: object) -> None:
         """Re-render detail so markup CSS variables pick up the new theme."""
@@ -1295,7 +1358,7 @@ class SessionManagerApp(App[None]):
         if q:
             filtered: list[SessionMeta] = []
             for s in sessions:
-                live = self.live.get(s.session_id)
+                live = live_for_session(self.live, s)
                 hay = " ".join(
                     [
                         s.display_title,
@@ -1340,7 +1403,7 @@ class SessionManagerApp(App[None]):
     def _target_projects(self) -> list[ProjectInfo]:
         """Marked projects if any; else focused project on projects pane; else listed."""
         if self.selected_project_slugs:
-            return [p for p in self.projects if p.slug in self.selected_project_slugs]
+            return [p for p in self.projects if p.key in self.selected_project_slugs]
         if self._focus_pane() == "projects":
             return [self.selected_project] if self.selected_project else []
         return [self.selected_project] if self.selected_project else []
@@ -1349,7 +1412,7 @@ class SessionManagerApp(App[None]):
         out: list[SessionMeta] = []
         for p in self.projects:
             for s in p.sessions:
-                if s.session_id in ids:
+                if s.key in ids or s.session_id in ids:
                     out.append(s)
         return out
 
@@ -1388,21 +1451,40 @@ class SessionManagerApp(App[None]):
     def _stoppable_among(
         self, sessions: list[SessionMeta]
     ) -> list[tuple[SessionMeta, LiveSession]]:
-        """Live sessions the active backend can stop."""
+        """Live sessions their owning backend can stop."""
         out: list[tuple[SessionMeta, LiveSession]] = []
         for s in sessions:
-            live = self.live.get(s.session_id)
-            if self.provider.can_stop(live) and live is not None:
+            live = live_for_session(self.live, s)
+            provider = self._provider_for_session(s)
+            if provider.can_stop(live) and live is not None:
                 out.append((s, live))
         return out
 
+    def _same_provider_or_toast(
+        self, items: list[ProjectInfo] | list[SessionMeta], *, action: str
+    ) -> str | None:
+        """Return shared provider name, or toast and return None if mixed."""
+        names = {getattr(i, "provider", None) for i in items}
+        names.discard(None)
+        if len(names) > 1:
+            self._show_toast(
+                f"Cannot {action} across different agent tools — unmark mixed rows",
+                success=False,
+                seconds=5,
+            )
+            return None
+        if not names:
+            return self.provider.name
+        return next(iter(names))
+
     def action_refresh(self) -> None:
-        self.projects = self.provider.discover(self.root)
-        self.live = self.provider.merge_live(self.root, use_cli=True)
-        known_sessions = {s.session_id for p in self.projects for s in p.sessions}
+        self.projects = federate_discover(self.providers)
+        self.live = federate_merge_live(self.providers, use_cli=True)
+        known_sessions = {s.key for p in self.projects for s in p.sessions}
         self.selected_session_ids &= known_sessions
-        known_slugs = {p.slug for p in self.projects}
+        known_slugs = {p.key for p in self.projects}
         self.selected_project_slugs &= known_slugs
+        self._setup_projects_columns()
         self._reload_projects_table()
         self._refresh_status()
 
@@ -1411,11 +1493,17 @@ class SessionManagerApp(App[None]):
         pane_label = {"projects": "projects", "sessions": "sessions", "detail": "detail"}.get(
             pane, pane
         )
+        if self._multi_agent():
+            agent_bit = f"[$text-muted]{len(self.providers)} agents[/]"
+            root_bit = f"[$text-muted]{roots_summary(self.providers)}[/]"
+        else:
+            agent_bit = f"[$text-muted]{self.provider.label}[/]"
+            root_bit = f"[$text-muted]{self.root}[/]"
         bits = [
             f"[b $accent]{pane_label}[/]",
             f"mark {len(self.selected_project_slugs)}p/{len(self.selected_session_ids)}s",
-            f"[$text-muted]{self.provider.label}[/]",
-            f"[$text-muted]{self.root}[/]",
+            agent_bit,
+            root_bit,
         ]
         if extra:
             bits.append(extra)
@@ -1450,7 +1538,7 @@ class SessionManagerApp(App[None]):
         """Detail pane content when the projects list is focused."""
         detail = self.query_one("#detail", Static)
         if self.selected_project_slugs and len(self.selected_project_slugs) > 1:
-            targets = [p for p in self.projects if p.slug in self.selected_project_slugs]
+            targets = [p for p in self.projects if p.key in self.selected_project_slugs]
             if not targets:
                 targets = [self.selected_project] if self.selected_project else []
             lines = [
@@ -1462,9 +1550,11 @@ class SessionManagerApp(App[None]):
             for p in targets:
                 total_sess += p.session_count
                 total_bytes += p.total_bytes
-                mark = MARK_ON if p.slug in self.selected_project_slugs else MARK_OFF
+                mark = MARK_ON if p.key in self.selected_project_slugs else MARK_OFF
+                agent = self._agent_label(p.provider)
                 lines.append(
-                    f"{mark} [$secondary]{p.cwd_guess[:42]}[/]  "
+                    f"{mark} [$secondary]{agent}[/]  "
+                    f"[$secondary]{p.cwd_guess[:36]}[/]  "
                     f"[$text-muted]{p.session_count} sess · {_fmt_size(p.total_bytes)}[/]"
                 )
             lines.append("")
@@ -1489,12 +1579,13 @@ class SessionManagerApp(App[None]):
         live_n = sum(
             1
             for s in p.sessions
-            if (lv := self.live.get(s.session_id)) is not None
+            if (lv := live_for_session(self.live, s)) is not None
             and (lv.is_killable or lv.kind == "background")
         )
-        marked = p.slug in self.selected_project_slugs
+        marked = p.key in self.selected_project_slugs
         lines = [
             f"[b $accent]{p.cwd_guess}[/]",
+            f"[$text-muted]agent[/]    [$secondary]{self._agent_label(p.provider)}[/]",
             f"[$text-muted]slug[/]     [$secondary]{p.slug}[/]",
             f"[$text-muted]path[/]     [$text-muted]{p.path}[/]",
             f"[$text-muted]sessions[/] {p.session_count}",
@@ -1511,25 +1602,37 @@ class SessionManagerApp(App[None]):
 
     def _reload_projects_table(self) -> None:
         table = self.query_one("#projects", DataTable)
-        keep_slug = self.selected_project.slug if self.selected_project else None
+        keep_key = self.selected_project.key if self.selected_project else None
+        self._setup_projects_columns()
         table.clear()
         focus_row = 0
+        show_agent = self._multi_agent()
         for i, p in enumerate(self.projects):
             label = p.cwd_guess if len(p.cwd_guess) < 40 else p.slug[:38] + "…"
-            mark = MARK_ON if p.slug in self.selected_project_slugs else MARK_OFF
-            table.add_row(
-                mark,
-                label,
-                str(p.session_count),
-                _fmt_size(p.total_bytes),
-                key=str(i),
-            )
-            if keep_slug and p.slug == keep_slug:
+            mark = MARK_ON if p.key in self.selected_project_slugs else MARK_OFF
+            if show_agent:
+                table.add_row(
+                    mark,
+                    self._agent_label(p.provider),
+                    label,
+                    str(p.session_count),
+                    _fmt_size(p.total_bytes),
+                    key=p.key,
+                )
+            else:
+                table.add_row(
+                    mark,
+                    label,
+                    str(p.session_count),
+                    _fmt_size(p.total_bytes),
+                    key=p.key,
+                )
+            if keep_key and p.key == keep_key:
                 focus_row = i
         if self.projects:
             if self.selected_project:
                 match = next(
-                    (p for p in self.projects if p.slug == self.selected_project.slug),
+                    (p for p in self.projects if p.key == self.selected_project.key),
                     None,
                 )
                 self.selected_project = match or self.projects[focus_row]
@@ -1540,18 +1643,19 @@ class SessionManagerApp(App[None]):
         else:
             self.selected_project = None
             self.query_one("#sessions", DataTable).clear()
+            roots = roots_summary(self.providers) or str(self.root)
             self.query_one("#detail", Static).update(
                 "[b]No projects found[/b]\n\n"
-                f"Config root: {self.root}\n"
-                "Press r to refresh · ? for help"
+                f"Config root(s): {roots}\n"
+                "Press r to refresh · , settings · ? for help"
             )
 
     def _update_project_marks(self) -> None:
         table = self.query_one("#projects", DataTable)
-        for i, p in enumerate(self.projects):
-            mark = MARK_ON if p.slug in self.selected_project_slugs else MARK_OFF
+        for p in self.projects:
+            mark = MARK_ON if p.key in self.selected_project_slugs else MARK_OFF
             try:
-                table.update_cell(str(i), "Sel", mark)
+                table.update_cell(p.key, "Sel", mark)
             except Exception:
                 self._reload_projects_table()
                 return
@@ -1561,7 +1665,7 @@ class SessionManagerApp(App[None]):
     def _reload_sessions_table(self, *, focus_session_id: str | None = None) -> None:
         table = self.query_one("#sessions", DataTable)
         keep_id = focus_session_id or (
-            self.selected_session.session_id if self.selected_session else None
+            self.selected_session.key if self.selected_session else None
         )
         table.clear()
         self._update_sessions_meta()
@@ -1572,23 +1676,19 @@ class SessionManagerApp(App[None]):
         focus_row = 0
         found = False
         for i, s in enumerate(sessions):
-            live = self.live.get(s.session_id)
+            live = live_for_session(self.live, s)
             title = s.display_title.replace("\n", " ")[:48]
             updated = s.mtime_dt.strftime("%Y-%m-%d %H:%M")
-            mark = (
-                MARK_ON
-                if s.session_id in self.selected_session_ids
-                else MARK_OFF
-            )
+            mark = MARK_ON if s.key in self.selected_session_ids else MARK_OFF
             table.add_row(
                 mark,
                 title,
                 updated,
                 _fmt_size(s.size_bytes),
                 _badges(s, live),
-                key=s.session_id,
+                key=s.key,
             )
-            if keep_id and s.session_id == keep_id:
+            if keep_id and (s.key == keep_id or s.session_id == keep_id):
                 focus_row = i
                 found = True
         if sessions:
@@ -1606,19 +1706,13 @@ class SessionManagerApp(App[None]):
             return
         table = self.query_one("#sessions", DataTable)
         for s in self._visible_sessions():
-            mark = (
-                MARK_ON
-                if s.session_id in self.selected_session_ids
-                else MARK_OFF
-            )
+            mark = MARK_ON if s.key in self.selected_session_ids else MARK_OFF
             try:
-                table.update_cell(s.session_id, "Sel", mark)
+                table.update_cell(s.key, "Sel", mark)
             except Exception:
                 self._reload_sessions_table(
                     focus_session_id=(
-                        self.selected_session.session_id
-                        if self.selected_session
-                        else None
+                        self.selected_session.key if self.selected_session else None
                     )
                 )
                 return
@@ -1648,13 +1742,11 @@ class SessionManagerApp(App[None]):
             total = 0
             for s in targets:
                 total += s.size_bytes
-                mark = (
-                    MARK_ON
-                    if s.session_id in self.selected_session_ids
-                    else MARK_OFF
-                )
+                mark = MARK_ON if s.key in self.selected_session_ids else MARK_OFF
+                agent = self._agent_label(s.provider)
                 lines.append(
-                    f"{mark} [$secondary]{s.session_id[:8]}…[/]  "
+                    f"{mark} [$secondary]{agent}[/]  "
+                    f"[$secondary]{s.session_id[:8]}…[/]  "
                     f"[$text-muted]{_fmt_size(s.size_bytes)}[/]  "
                     f"{s.display_title[:40]}"
                 )
@@ -1672,13 +1764,24 @@ class SessionManagerApp(App[None]):
                 return
             detail.update("[$text-muted]Select a session[/]")
             return
-        live = self.live.get(s.session_id)
-        inv = self.provider.collect_fragments(
-            s.session_id, project_slug=s.project_slug
-        )
+        live = live_for_session(self.live, s)
+        provider = self._provider_for_session(s)
+        try:
+            inv = provider.collect_fragments(
+                s.session_id, project_slug=s.project_slug
+            )
+        except Exception:
+            from axism.fragments import FragmentInventory
+
+            inv = FragmentInventory(
+                session_id=s.session_id,
+                project_slug=s.project_slug,
+                fragments=[],
+            )
         title = s.display_title.replace("\n", " ")
         lines = [
             f"[b $accent]{title}[/]",
+            f"[$text-muted]agent[/]    [$secondary]{self._agent_label(s.provider)}[/]",
             f"[$text-muted]id[/]       [$secondary]{s.session_id}[/]",
             f"[$text-muted]cwd[/]      {s.cwd or '-'}",
             f"[$text-muted]project[/]  {s.project_slug}",
@@ -1689,7 +1792,7 @@ class SessionManagerApp(App[None]):
             f"[$text-muted]tags[/]     {_badges(s, live)}",
             (
                 f"[$text-muted]selected[/] "
-                f"{'[$text-success]yes[/]' if s.session_id in self.selected_session_ids else 'no'}"
+                f"{'[$text-success]yes[/]' if s.key in self.selected_session_ids else 'no'}"
             ),
             "",
             "[b $primary]Fragments[/]",
@@ -1709,20 +1812,27 @@ class SessionManagerApp(App[None]):
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         table = event.data_table
         if table.id == "projects" and event.row_key is not None:
-            try:
-                idx = int(str(event.row_key.value))
-            except ValueError:
-                return
-            if 0 <= idx < len(self.projects):
-                self.selected_project = self.projects[idx]
-                self._reload_sessions_table()
-                self._refresh_status()
+            key = str(event.row_key.value)
+            match = next((p for p in self.projects if p.key == key), None)
+            if match is None:
+                # Legacy numeric keys during transitional reloads.
+                try:
+                    idx = int(key)
+                except ValueError:
+                    return
+                if 0 <= idx < len(self.projects):
+                    match = self.projects[idx]
+                else:
+                    return
+            self.selected_project = match
+            self._reload_sessions_table()
+            self._refresh_status()
         elif table.id == "sessions" and event.row_key is not None:
             if not self.selected_project:
                 return
-            sid = str(event.row_key.value)
+            key = str(event.row_key.value)
             for s in self._visible_sessions():
-                if s.session_id == sid:
+                if s.key == key or s.session_id == key:
                     self.selected_session = s
                     self._show_detail()
                     self._refresh_status()
@@ -1738,40 +1848,35 @@ class SessionManagerApp(App[None]):
             if not p:
                 self._show_toast("No project focused", success=False, seconds=2.5)
                 return
-            if p.slug in self.selected_project_slugs:
-                self.selected_project_slugs.discard(p.slug)
+            if p.key in self.selected_project_slugs:
+                self.selected_project_slugs.discard(p.key)
             else:
-                self.selected_project_slugs.add(p.slug)
+                self.selected_project_slugs.add(p.key)
             self._update_project_marks()
             return
-        if pane == "sessions":
-            s = self.selected_session
-            if not s:
-                self._show_toast("No session focused", success=False, seconds=2.5)
-                return
-            if s.session_id in self.selected_session_ids:
-                self.selected_session_ids.discard(s.session_id)
-            else:
-                self.selected_session_ids.add(s.session_id)
-            self._update_session_marks()
+        s = self.selected_session
+        if not s:
+            self._show_toast("No session focused", success=False, seconds=2.5)
             return
-        self._show_toast("Focus projects or sessions to select", success=False, seconds=2.5)
+        if s.key in self.selected_session_ids:
+            self.selected_session_ids.discard(s.key)
+        else:
+            self.selected_session_ids.add(s.key)
+        self._update_session_marks()
 
     def action_select_all(self) -> None:
         pane = self._focus_pane()
         if pane == "projects":
             for p in self.projects:
-                self.selected_project_slugs.add(p.slug)
+                self.selected_project_slugs.add(p.key)
             self._update_project_marks()
             return
         if pane in {"sessions", "detail"}:
             if not self.selected_project:
                 return
             for s in self.selected_project.sessions:
-                self.selected_session_ids.add(s.session_id)
+                self.selected_session_ids.add(s.key)
             self._update_session_marks()
-            return
-        self._show_toast("Focus a pane to select all", success=False, seconds=2.5)
 
     def action_clear_select(self) -> None:
         """Clear project and session marks everywhere."""
@@ -1864,18 +1969,24 @@ class SessionManagerApp(App[None]):
                 self._show_toast(f"Could not save settings: {exc}", success=False, seconds=4)
                 return
             self._axism_settings = updated
-            self.provider = provider_from_settings(updated)
+            self.providers = enabled_providers_from_settings(updated)
+            self.provider = (
+                provider_by_name(self.providers, updated.active_provider)
+                or self.providers[0]
+            )
             self.root = self.provider.config_root()
+            self._projects_have_agent_col = False
             self.selected_project_slugs.clear()
             self.selected_session_ids.clear()
             self.selected_project = None
             self.selected_session = None
             self.action_refresh()
-            self._show_toast(
-                f"Saved {path.name} · {self.provider.label} → {self.root}",
-                success=True,
-                seconds=4,
-            )
+            if self._multi_agent():
+                labels = ", ".join(p.label for p in self.providers)
+                msg = f"Saved {path.name} · {len(self.providers)} agents ({labels})"
+            else:
+                msg = f"Saved {path.name} · {self.provider.label} → {self.root}"
+            self._show_toast(msg, success=True, seconds=4)
 
         self.push_screen(SettingsScreen(load_settings()), _after)
 
@@ -1901,8 +2012,11 @@ class SessionManagerApp(App[None]):
                 f"[$text-muted]Platform[/]  {platform.system()} {platform.release()}",
                 f"[$text-muted]Machine[/]   {platform.machine()}",
                 "",
-                f"[$text-muted]Provider[/]  {self.provider.label} ({self.provider.name})",
-                f"[$text-muted]Config[/]    {self.root}",
+                (
+                    "[$text-muted]Providers[/] "
+                    + ", ".join(f"{p.label}" for p in self.providers)
+                ),
+                f"[$text-muted]Config[/]    {roots_summary(self.providers)}",
                 f"[$text-muted]Settings[/]  {settings_path()}",
                 f"[$text-muted]Theme[/]     {self.theme}",
                 "",
@@ -1929,7 +2043,7 @@ class SessionManagerApp(App[None]):
             return
 
         warnings = [
-            f"Stops the running work via {self.provider.label}.",
+            "Stops each session via its agent tool.",
             "Conversation/transcript is kept; use Delete to remove files.",
         ]
         lines = [
@@ -1955,7 +2069,7 @@ class SessionManagerApp(App[None]):
             details: list[str] = []
             last_fail = ""
             for s, live in targets:
-                ok, msg = self.provider.slash_stop(s.session_id, live)
+                ok, msg = self._provider_for_session(s).slash_stop(s.session_id, live)
                 last = msg.splitlines()[-1] if msg else ""
                 details.append(f"{s.session_id[:8]}: {last}")
                 if ok:
@@ -1994,20 +2108,21 @@ class SessionManagerApp(App[None]):
         if self._focus_pane() == "projects":
             self._show_toast("Focus a session to open", success=False, seconds=2.5)
             return
-        if not self.provider.capabilities.resume:
-            self._show_toast(
-                f"{self.provider.label} cannot open sessions", success=False, seconds=4
-            )
-            return
         s = self.selected_session
         if not s:
             self._show_toast("No session focused to open", success=False)
             return
-        live = self.live.get(s.session_id)
+        provider = self._provider_for_session(s)
+        if not provider.capabilities.resume:
+            self._show_toast(
+                f"{provider.label} cannot open sessions", success=False, seconds=4
+            )
+            return
+        live = live_for_session(self.live, s)
         self.exit(
             {
-                "provider": self.provider.name,
-                "config_dir": str(self.root),
+                "provider": provider.name,
+                "config_dir": str(provider.config_root()),
                 "session": s,
                 "open_id": s.session_id,
                 "cwd": s.cwd,
@@ -2018,20 +2133,21 @@ class SessionManagerApp(App[None]):
         )
 
     def action_rename_session(self) -> None:
-        """Rename the focused session with the active backend's title mechanism."""
+        """Rename the focused session with its owning backend's title mechanism."""
         if self._focus_pane() == "projects":
             self._show_toast("Focus a session to rename", success=False, seconds=2.5)
-            return
-        if not self.provider.capabilities.rename:
-            self._show_toast(
-                f"{self.provider.label} cannot rename sessions",
-                success=False,
-                seconds=4,
-            )
             return
         s = self.selected_session
         if not s:
             self._show_toast("No session focused to rename", success=False)
+            return
+        provider = self._provider_for_session(s)
+        if not provider.capabilities.rename:
+            self._show_toast(
+                f"{provider.label} cannot rename sessions",
+                success=False,
+                seconds=4,
+            )
             return
         current = s.display_title.replace("\n", " ").strip()
 
@@ -2043,7 +2159,7 @@ class SessionManagerApp(App[None]):
                 self._show_toast("Title unchanged", success=False, seconds=2)
                 return
             try:
-                ok, msg = self.provider.rename(s.session_id, new_title)
+                ok, msg = provider.rename(s.session_id, new_title)
             except UnsupportedOperation as exc:
                 self._show_toast(str(exc), success=False, seconds=4)
                 return
@@ -2056,15 +2172,24 @@ class SessionManagerApp(App[None]):
         )
 
     def _move_choices(
-        self, *, exclude_slugs: set[str] | None = None
+        self,
+        *,
+        exclude_slugs: set[str] | None = None,
+        provider_name: str | None = None,
     ) -> list[tuple[str, str]]:
         exclude = exclude_slugs or set()
         choices: list[tuple[str, str]] = []
         for p in self.projects:
             if p.slug in exclude:
                 continue
+            if provider_name and p.provider and p.provider != provider_name:
+                continue
+            agent = self._agent_label(p.provider)
             label = (
-                f"{p.cwd_guess}  ·  {p.session_count} sess · {_fmt_size(p.total_bytes)}"
+                f"{agent} · {p.cwd_guess}  ·  {p.session_count} sess · "
+                f"{_fmt_size(p.total_bytes)}"
+                if self._multi_agent()
+                else f"{p.cwd_guess}  ·  {p.session_count} sess · {_fmt_size(p.total_bytes)}"
             )
             choices.append((p.cwd_guess, label))
         return choices
@@ -2073,7 +2198,7 @@ class SessionManagerApp(App[None]):
         """Return a short reason if any session should be stopped before move."""
         live_n = 0
         for s in sessions:
-            live = self.live.get(s.session_id)
+            live = live_for_session(self.live, s)
             if live is None:
                 continue
             if live.is_killable or (
@@ -2086,22 +2211,22 @@ class SessionManagerApp(App[None]):
         return None
 
     def action_move_items(self) -> None:
-        """Move focused/marked project(s) or session(s) to another project path."""
+        """Move focused/marked project(s) or session(s) within the same agent tool."""
         pane = self._focus_pane()
-        caps = self.provider.capabilities
-        wants_projects = pane == "projects"
-        if (wants_projects and not caps.move_projects) or (
-            not wants_projects and not caps.move_sessions
-        ):
-            self._show_toast(
-                f"{self.provider.label} cannot move sessions", success=False, seconds=4
-            )
-            return
 
         if pane == "projects":
             targets = self._target_projects()
             if not targets:
                 self._show_toast("No project to move", success=False, seconds=2.5)
+                return
+            pname = self._same_provider_or_toast(targets, action="move")
+            if pname is None:
+                return
+            provider = provider_by_name(self.providers, pname) or self.provider
+            if not provider.capabilities.move_projects:
+                self._show_toast(
+                    f"{provider.label} cannot move projects", success=False, seconds=4
+                )
                 return
             blocked = self._sessions_are_live_blocked(
                 [s for p in targets for s in p.sessions]
@@ -2114,7 +2239,8 @@ class SessionManagerApp(App[None]):
             title = f"Move {n} project{'s' if n != 1 else ''}"
             hint = (
                 "Select destination project, or type a new absolute workspace path. "
-                "One project → new path renames the dir; otherwise sessions are merged."
+                "One project → new path renames the dir; otherwise sessions are merged. "
+                "Destinations are limited to the same agent tool."
             )
 
             def _after_dest(dest: str | None) -> None:
@@ -2126,7 +2252,7 @@ class SessionManagerApp(App[None]):
                     if not confirmed:
                         self._show_toast("Move cancelled", success=False, seconds=2)
                         return
-                    result = self.provider.move_projects(targets, dest)
+                    result = provider.move_projects(targets, dest)
                     self.selected_project_slugs.clear()
                     self.action_refresh()
                     self._show_toast(result.message, success=result.ok, seconds=4)
@@ -2135,6 +2261,7 @@ class SessionManagerApp(App[None]):
 
                 body_lines = [
                     f"[b]{n} project(s)[/b] → [$secondary]{dest}[/]",
+                    f"[$text-muted]via {provider.label}[/]",
                     "",
                     "[b]Sources[/b]",
                 ]
@@ -2163,7 +2290,11 @@ class SessionManagerApp(App[None]):
                 )
 
             self.push_screen(
-                MoveTargetScreen(title, self._move_choices(exclude_slugs=exclude), hint),
+                MoveTargetScreen(
+                    title,
+                    self._move_choices(exclude_slugs=exclude, provider_name=pname),
+                    hint,
+                ),
                 _after_dest,
             )
             return
@@ -2172,6 +2303,15 @@ class SessionManagerApp(App[None]):
             sessions = self._target_sessions_for_move()
             if not sessions:
                 self._show_toast("No session to move", success=False, seconds=2.5)
+                return
+            pname = self._same_provider_or_toast(sessions, action="move")
+            if pname is None:
+                return
+            provider = provider_by_name(self.providers, pname) or self.provider
+            if not provider.capabilities.move_sessions:
+                self._show_toast(
+                    f"{provider.label} cannot move sessions", success=False, seconds=4
+                )
                 return
             blocked = self._sessions_are_live_blocked(sessions)
             if blocked:
@@ -2182,7 +2322,7 @@ class SessionManagerApp(App[None]):
             title = f"Move {n} session{'s' if n != 1 else ''}"
             hint = (
                 "Select destination project, or type an absolute workspace path "
-                "(creates the project dir if needed)."
+                "(creates the project dir if needed). Same agent tool only."
             )
 
             def _after_dest(dest: str | None) -> None:
@@ -2194,13 +2334,14 @@ class SessionManagerApp(App[None]):
                     if not confirmed:
                         self._show_toast("Move cancelled", success=False, seconds=2)
                         return
-                    result = self.provider.move_sessions(sessions, dest)
+                    result = provider.move_sessions(sessions, dest)
                     self.selected_session_ids.clear()
                     self.action_refresh()
                     self._show_toast(result.message, success=result.ok, seconds=4)
 
                 body_lines = [
                     f"[b]{n} session(s)[/b] → [$secondary]{dest}[/]",
+                    f"[$text-muted]via {provider.label}[/]",
                     "",
                     "[b]Targets[/b]",
                 ]
@@ -2227,7 +2368,11 @@ class SessionManagerApp(App[None]):
                 )
 
             self.push_screen(
-                MoveTargetScreen(title, self._move_choices(exclude_slugs=exclude), hint),
+                MoveTargetScreen(
+                    title,
+                    self._move_choices(exclude_slugs=exclude, provider_name=pname),
+                    hint,
+                ),
                 _after_dest,
             )
             return
@@ -2360,16 +2505,26 @@ class SessionManagerApp(App[None]):
         if not projects:
             self._show_toast("No project selected", success=False, seconds=2.5)
             return
+        pname = self._same_provider_or_toast(projects, action="delete")
+        if pname is None:
+            return
+        provider = provider_by_name(self.providers, pname) or self.provider
+        if not provider.capabilities.delete_projects:
+            self._show_toast(
+                f"{provider.label} cannot delete projects", success=False, seconds=4
+            )
+            return
         packed: list[tuple[str, str, object, list[str]]] = []
         for p in projects:
-            plan = self.provider.plan_project_delete(
+            plan = provider.plan_project_delete(
                 p.slug, force=True, keep_memory=False
             )
-            preview = self.provider.execute_project_delete(
+            preview = provider.execute_project_delete(
                 plan, dry_run=True, force=True, stop_live=True
             )
             packed.append((p.slug, p.cwd_guess, plan, preview))
         body, warnings = _format_project_delete_confirm(packed)
+        keys = [p.key for p in projects]
         slugs = [p.slug for p in projects]
 
         def _after(confirmed: bool | None) -> None:
@@ -2379,17 +2534,18 @@ class SessionManagerApp(App[None]):
                 return
             all_actions: list[str] = []
             for slug in slugs:
-                plan_exec = self.provider.plan_project_delete(
+                plan_exec = provider.plan_project_delete(
                     slug, force=True, keep_memory=False
                 )
-                actions = self.provider.execute_project_delete(
+                actions = provider.execute_project_delete(
                     plan_exec,
                     dry_run=False,
                     force=True,
                     stop_live=True,
                 )
                 all_actions.extend(actions)
-                self.selected_project_slugs.discard(slug)
+            for key in keys:
+                self.selected_project_slugs.discard(key)
             ok, msg = _summarize_project_delete(slugs, all_actions)
             self.selected_session_ids.clear()
             self._set_status("; ".join(all_actions)[:200])
@@ -2407,6 +2563,7 @@ class SessionManagerApp(App[None]):
                 ),
                 warnings=warnings
                 + [
+                    f"Deletes via {provider.label}.",
                     "Deletes the backend's project directory and linked session data.",
                     "Source workspace files on disk are not moved or removed.",
                 ],
@@ -2420,15 +2577,24 @@ class SessionManagerApp(App[None]):
         if not targets:
             self._show_toast("No session selected", success=False, seconds=2.5)
             return
+        pname = self._same_provider_or_toast(targets, action="delete")
+        if pname is None:
+            return
+        provider = provider_by_name(self.providers, pname) or self.provider
+        if not provider.capabilities.delete_sessions:
+            self._show_toast(
+                f"{provider.label} cannot delete sessions", success=False, seconds=4
+            )
+            return
         plans = [
-            self.provider.plan_delete(
+            provider.plan_delete(
                 s.session_id,
                 project_slug=s.project_slug,
                 force=True,
             )
             for s in targets
         ]
-        preview_actions = self.provider.execute_deletes(
+        preview_actions = provider.execute_deletes(
             plans, dry_run=True, force=True, stop_live=True
         )
         body, warnings = _format_session_delete_confirm(
@@ -2441,14 +2607,14 @@ class SessionManagerApp(App[None]):
                 self._show_toast("Delete cancelled", success=False, seconds=2.5)
                 return
             plans_exec = [
-                self.provider.plan_delete(
+                provider.plan_delete(
                     s.session_id,
                     project_slug=s.project_slug,
                     force=True,
                 )
                 for s in targets
             ]
-            actions = self.provider.execute_deletes(
+            actions = provider.execute_deletes(
                 plans_exec, dry_run=False, force=True, stop_live=True
             )
             ok, msg = _summarize_session_delete(targets, actions)
@@ -2462,7 +2628,7 @@ class SessionManagerApp(App[None]):
             ConfirmDeleteScreen(
                 body,
                 title=f"Delete {n} session{'s' if n != 1 else ''}",
-                warnings=warnings,
+                warnings=warnings + [f"Deletes via {provider.label}."],
                 confirm_verb="Delete",
             ),
             _after,
