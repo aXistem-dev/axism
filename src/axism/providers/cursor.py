@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import shutil
 from pathlib import Path
 
@@ -14,6 +13,7 @@ from axism.move import MoveResult
 from axism.paths import path_size
 from axism.providers.base import Capabilities, ProviderBase
 from axism.providers.common import (
+    exec_with_cwd,
     execute_fragment_deletes,
     remove_path,
     terminate_pid,
@@ -89,11 +89,7 @@ class CursorProvider(ProviderBase):
 
     def resume(self, session: SessionMeta, live: LiveSession | None = None) -> None:
         argv, workdir = self.open_command(session, live)
-        if workdir:
-            path = Path(workdir).expanduser()
-            if path.is_dir():
-                os.chdir(path)
-        os.execvp(argv[0], argv)
+        exec_with_cwd(argv, workdir)
 
     # -- stop -------------------------------------------------------------
 
@@ -172,7 +168,7 @@ class CursorProvider(ProviderBase):
         inventory = self.collect_fragments(full_id, project_slug=project_slug)
         live = cursor_live.merge_live({full_id}).get(full_id)
         plan = DeletePlan(session_id=full_id, inventory=inventory, live=live)
-        if live is not None and live.is_live and not force:
+        if live is not None and live.is_killable and not force:
             plan.blocked_reason = (
                 f"cursor-agent still running (pid={live.pid}); stop it or use --force"
             )

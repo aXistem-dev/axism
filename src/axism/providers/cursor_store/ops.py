@@ -101,6 +101,7 @@ def move_sessions(
             target = parent / directory.name
             if target.resolve() == directory.resolve():
                 actions.append(f"{short}…: already in destination")
+                session_moved = True
                 continue
             if target.exists():
                 actions.append(f"{short}…: collision in dest — skipped")

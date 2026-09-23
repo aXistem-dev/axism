@@ -12,7 +12,12 @@ from axism.fragments import FragmentInventory
 from axism.live import LiveSession
 from axism.move import MoveResult
 from axism.providers.base import Capabilities, ProviderBase
-from axism.providers.common import find_agent_sessions, remove_path, terminate_pid
+from axism.providers.common import (
+    exec_with_cwd,
+    find_agent_sessions,
+    remove_path,
+    terminate_pid,
+)
 from axism.providers.hermes_store import discover as hermes_discover
 from axism.providers.hermes_store import fragments as hermes_fragments
 from axism.providers.hermes_store import ops as hermes_ops
@@ -89,12 +94,8 @@ class HermesProvider(ProviderBase):
 
     def resume(self, session: SessionMeta, live: LiveSession | None = None) -> None:
         argv, workdir = self.open_command(session, live)
-        if workdir:
-            path = Path(workdir).expanduser()
-            if path.is_dir():
-                os.chdir(path)
         os.environ["HERMES_HOME"] = str(self.config_root())
-        os.execvp(argv[0], argv)
+        exec_with_cwd(argv, workdir)
 
     # -- stop -------------------------------------------------------------
 
@@ -202,6 +203,22 @@ class HermesProvider(ProviderBase):
         root = self.config_root()
         actions: list[str] = []
         for plan in plans:
+            live = plan.live
+            if stop_live and live is not None and live.is_killable:
+                if dry_run:
+                    actions.append(
+                        f"{plan.session_id[:8]}: would stop live session "
+                        f"(state={live.state})"
+                    )
+                else:
+                    ok, msg = self.stop(plan.session_id, live)
+                    actions.append(f"{plan.session_id[:8]}: stop: {msg}")
+                    if not ok and not force:
+                        actions.append(
+                            f"{plan.session_id[:8]}: aborted: could not stop live session"
+                        )
+                        continue
+
             if dry_run:
                 actions.append(
                     f"would run hermes sessions delete {plan.session_id} --yes"

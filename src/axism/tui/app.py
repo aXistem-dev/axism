@@ -2761,8 +2761,8 @@ def run_tui() -> None:
     try:
         provider.resume(session, live)
     except (FileNotFoundError, UnsupportedOperation) as exc:
-        print(f"axism: {exc}", file=__import__("sys").stderr)
+        print(f"axism: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
     except OSError as exc:
-        print(f"axism: failed to open session: {exc}", file=__import__("sys").stderr)
+        print(f"axism: failed to open session: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
