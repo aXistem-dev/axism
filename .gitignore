@@ -14,3 +14,7 @@ htmlcov/
 *.swp
 .DS_Store
 uv.lock
+
+# Work-in-progress branding assets, not ready to commit yet
+aXism-DARKFAVICON-NeedTransparentFix.png
+aXism-LIGHTFAVICON-NeedTransparentFix.png
