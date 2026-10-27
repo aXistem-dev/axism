@@ -90,7 +90,7 @@ def _sidecar_title(conv_dir: Path) -> str | None:
 def read_cli_meta(db: Path) -> dict:
     """Decode the hex-encoded JSON blob in a CLI chat's ``meta`` table."""
     try:
-        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2.0)
+        con = sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True, timeout=2.0)
     except sqlite3.Error:
         return {}
     try:

@@ -236,3 +236,16 @@ def test_move_is_unsupported(hermes_env: tuple[Path, str]):
 def test_empty_home_discovers_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "empty"))
     assert HermesProvider().discover() == []
+
+
+def test_state_db_under_a_hash_in_the_path_is_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root = tmp_path / "a#b" / "hermes"
+    root.mkdir(parents=True)
+    workspace = tmp_path / "work" / "demo"
+    workspace.mkdir(parents=True)
+    _make_state_db(state_db(root), str(workspace), str(tmp_path / "work"))
+    monkeypatch.setenv("HERMES_HOME", str(root))
+    ids = {s.session_id for p in HermesProvider().discover() for s in p.sessions}
+    assert CLI_SESSION in ids

@@ -162,9 +162,13 @@ def move_projects(
     if len(sources) == 1 and not dest_project.exists() and not dest_bucket.exists():
         src = sources[0]
         src_project = projects_dir(root) / src.slug
-        src_bucket = (
-            chats_dir(root) / cwd_bucket(src.cwd_guess) if src.cwd_guess else None
-        )
+        if src.slug.startswith("chats-"):
+            # Unknown workspace: the bucket name is part of the slug.
+            src_bucket = chats_dir(root) / src.slug.removeprefix("chats-")
+        else:
+            src_bucket = (
+                chats_dir(root) / cwd_bucket(src.cwd_guess) if src.cwd_guess else None
+            )
         actions: list[str] = []
         if dry_run:
             if src_project.is_dir():

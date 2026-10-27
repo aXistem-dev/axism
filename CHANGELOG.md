@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Cursor: moving a project whose workspace is unknown (a `chats-…` entry) now moves its chats instead of failing
+- Cursor and Hermes databases are read correctly when the config path contains characters such as `#` or `?`
 - Cursor: deleting a project that does not exist is refused (even with `--force`) instead of touching the path you typed, and a Cursor project delete only removes inside its own `projects/` and `chats/` folders
 - Cursor: deleting a project keeps its credentials and agent config (`mcp-auth.json`, `mcps/`, …) and removes the folder only when nothing is left
 - A live-session record is trusted only while its process start time still matches, so a reused process id is never listed as live or signalled; duplicate records for one session prefer a running one, then the newest

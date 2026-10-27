@@ -352,3 +352,33 @@ def test_project_delete_removes_dir_when_nothing_protected(cursor_env: tuple[Pat
     plan = provider.plan_project_delete(project.slug)
     provider.execute_project_delete(plan, dry_run=False, force=True)
     assert not (root / "projects" / project.slug).exists()
+
+
+def test_move_unknown_workspace_project_uses_its_bucket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root = tmp_path / "cursor"
+    bucket_name = hashlib.md5(b"/home/alice/gone").hexdigest()
+    _write_cli_chat(root / "chats" / bucket_name / CLI_ONLY, "Orphan chat")
+    monkeypatch.setenv("CURSOR_DATA_DIR", str(root))
+    provider = CursorProvider()
+
+    project = provider.discover()[0]
+    assert project.slug == f"chats-{bucket_name}"
+    dest = tmp_path / "work" / "new"
+    result = provider.move_projects([project], str(dest))
+    assert result.ok, result.message
+    assert (root / "chats" / cwd_bucket(dest) / CLI_ONLY).is_dir()
+    assert not (root / "chats" / bucket_name).exists()
+
+
+def test_sqlite_chat_under_a_hash_in_the_path_is_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root = tmp_path / "a#b" / "cursor"
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _write_cli_chat(root / "chats" / cwd_bucket(workspace) / CLI_ONLY, "Hash chat")
+    monkeypatch.setenv("CURSOR_DATA_DIR", str(root))
+    sessions = [s for p in CursorProvider().discover() for s in p.sessions]
+    assert [s.title for s in sessions] == ["Hash chat"]

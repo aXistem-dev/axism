@@ -31,7 +31,7 @@ WANTED_COLUMNS = (
 
 def connect(db: Path) -> sqlite3.Connection:
     """Read-only connection — the gateway may hold the write lock."""
-    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
+    con = sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True, timeout=5.0)
     con.row_factory = sqlite3.Row
     return con
 
