@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 DEMO_CWD = "/home/alice/src/demo"
@@ -158,3 +159,19 @@ def _pinned_tmp_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     ):
         monkeypatch.setattr(target, lambda: [scratch])
     return scratch
+
+
+_REAL_WHICH = shutil.which
+_AGENT_BINARIES = {"claude", "hermes", "cursor-agent", "cursor"}
+
+
+@pytest.fixture(autouse=True)
+def _no_real_agent_binary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test may find, and so run, a real agent binary on PATH."""
+
+    def which(cmd, *args, **kwargs):
+        if str(cmd) in _AGENT_BINARIES:
+            return None
+        return _REAL_WHICH(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "which", which)

@@ -12,6 +12,7 @@ from conftest import DEMO_SLUG, SESSION_A, SESSION_B, build_fake_config, write_j
 from textual.widgets import DataTable, Input
 
 import axism.tui.app as tui
+from axism.actions import actions_failed
 from axism.tui.app import ConfirmDeleteScreen, SessionManagerApp
 
 
@@ -56,7 +57,9 @@ def _run(coro):
         "aborted: could not stop live session (11111111)",
         "aborted: some reason",
         "aborted 11111111: some reason",
-        "aborted: project kept because a live session could not be stopped",
+        "aborted: project folder kept because a live session could not be stopped; 1 other session(s) deleted",
+        "aborted: a live session could not be stopped; 0 other session(s) deleted",
+        "error: hermes sessions delete abc failed: no such session",
         "refused: /x/y outside /x/projects",
         "refused: /x/y outside the session stores",
         "kill(123) failed: boom",
@@ -69,7 +72,7 @@ def _run(coro):
     ],
 )
 def test_actions_failed_detects_failure_lines(line):
-    assert tui._actions_failed(["removed a", line])
+    assert actions_failed(["removed a", line])
 
 
 @pytest.mark.parametrize(
@@ -83,7 +86,7 @@ def test_actions_failed_detects_failure_lines(line):
     ],
 )
 def test_actions_failed_ignores_success_lines(line):
-    assert not tui._actions_failed([line])
+    assert not actions_failed([line])
 
 
 def test_summaries_name_the_failure_line():
@@ -357,5 +360,39 @@ def test_scrolling_lists_fit_without_clipping(tmp_path, monkeypatch, size):
                 assert table.show_vertical_scrollbar
                 region = table.scrollable_content_region
                 assert table.virtual_size.width <= region.width, (tid, size)
+
+    _run(main())
+
+
+def test_keep_memory_toggle_does_not_rebuild_plans(tmp_path, monkeypatch):
+    import axism.delete as delete_mod
+
+    _setup(tmp_path, monkeypatch)
+    calls: list[int] = []
+    real = delete_mod.merge_live
+
+    def counting(*a, **k):
+        calls.append(1)
+        return real(*a, **k)
+
+    monkeypatch.setattr(delete_mod, "merge_live", counting)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            app.query_one("#projects").focus()
+            await pilot.pause()
+            await pilot.press("d")
+            await pilot.pause()
+            opened = len(calls)
+            assert opened > 0
+            await pilot.press("k")
+            await pilot.pause()
+            await pilot.press("k")
+            await pilot.pause()
+            assert len(calls) == opened
+            await pilot.press("n")
+            await pilot.pause()
 
     _run(main())

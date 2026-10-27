@@ -117,3 +117,39 @@ def test_move_project_refuses_live_session_without_force(
     dest = str(tmp_path / "other-workspace")
     assert _run(["move", "--project", DEMO_CWD, "--to", dest]) == 2
     assert (fake_root / "projects" / "-home-alice-src-demo").exists()
+
+
+def _stub_failed_stop(monkeypatch: pytest.MonkeyPatch, session_id: str) -> None:
+    live = LiveSession(
+        session_id=session_id, kind="interactive", state="busy", pid=4242, cwd=DEMO_CWD
+    )
+    monkeypatch.setattr("axism.delete.merge_live", lambda *a, **k: {session_id: live})
+    monkeypatch.setattr("axism.live._live_pid", lambda *_a, **_k: True)
+    monkeypatch.setattr("axism.live._pid_alive", lambda pid: True)
+    monkeypatch.setattr(
+        "axism.delete.kill_live_session", lambda *a, **k: (False, "stuck")
+    )
+
+
+def test_delete_yes_exits_one_when_a_step_failed(
+    fake_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+):
+    _stub_failed_stop(monkeypatch, SESSION_A)
+    assert _run(["delete", SESSION_A, "--yes", "--force"]) == 1
+    assert "aborted" in capsys.readouterr().out
+    assert (fake_root / "projects" / "-home-alice-src-demo" / f"{SESSION_A}.jsonl").exists()
+
+
+def test_delete_project_yes_exits_one_when_a_step_failed(
+    fake_root: Path, monkeypatch: pytest.MonkeyPatch, capsys
+):
+    _stub_failed_stop(monkeypatch, SESSION_A)
+    assert _run(["delete-project", DEMO_CWD, "--yes", "--force"]) == 1
+    assert "aborted" in capsys.readouterr().out
+    assert (fake_root / "projects" / "-home-alice-src-demo").is_dir()
+
+
+def test_delete_project_accepts_a_dash_slug_after_double_dash(fake_root: Path):
+    assert _run(["delete-project", "--dry-run", "--", "-home-alice-src-demo"]) == 0
+    assert _run(["delete-project", "--yes", "--", "-home-alice-src-demo"]) == 0
+    assert not (fake_root / "projects" / "-home-alice-src-demo").exists()

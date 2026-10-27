@@ -80,13 +80,13 @@ Everything the app does is also available as a command, which is handy for scrip
 | `move ID... --to PATH` | Move sessions (add `--project` to move whole projects) |
 | `export ID --to-provider AGENT --to PATH` | Copy a session into another agent |
 | `delete ID...` | Delete sessions |
-| `delete-project PATH` | Delete a project and its sessions |
+| `delete-project PATH` | Delete a project and its sessions (give a slug as `delete-project -- -home-alice-src-demo`) |
 | `purge-project PATH` | Run Claude Code's own project purge |
 
 A few things worth knowing:
 
 - Session IDs can be shortened to any unique prefix.
-- `delete`, `delete-project`, `purge-project`, and `stop` only show a preview until you add `--yes`. `delete` and `delete-project` exit 1 after that bare preview, 0 after an explicit `--dry-run` or a completed `--yes` run, and 2 whenever the plan is blocked (not found, or a live session without `--force`). `move` and `export` take `--dry-run` to preview; `move` refuses sessions that are running unless you pass `--force`.
+- `delete`, `delete-project`, `purge-project`, and `stop` only show a preview until you add `--yes`. `delete` and `delete-project` exit 1 after that bare preview, 0 after an explicit `--dry-run` or a `--yes` run that completed, 1 as well when a `--yes` run reported an aborted, refused or failed step, and 2 whenever the plan is blocked (not found, or a live session without `--force`). `move` and `export` take `--dry-run` to preview; `move` refuses sessions that are running unless you pass `--force`.
 - `list` covers every enabled agent. Other commands use the default agent (Claude Code unless you change it), so add `--provider cursor` or `--provider hermes` to work on those sessions.
 
 ```bash

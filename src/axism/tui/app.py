@@ -5,7 +5,7 @@ from __future__ import annotations
 import platform
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -20,6 +20,7 @@ from textual.widgets._header import HeaderClock, HeaderClockSpace
 from textual.widgets.option_list import Option
 
 from axism import __commit__, version_string
+from axism.actions import actions_failed, first_failure
 from axism.discover import ProjectInfo, SessionMeta
 from axism.live import LiveSession
 from axism.move import MoveResult
@@ -387,41 +388,12 @@ def _badges(sess: SessionMeta, live: LiveSession | None) -> str:
     return " ".join(tags) if tags else "-"
 
 
-_FAILURE_PREFIXES = ("aborted", "refused:", "error ")
-_FAILURE_MARKERS = (
-    " failed",
-    "still alive",
-    "no longer runs",
-    "stop/kill/rm failed",
-)
-
-
-def _is_failure_line(line: str) -> bool:
-    """True for a backend action line that reports a failed or refused step."""
-    if line.startswith(_FAILURE_PREFIXES):
-        return True
-    low = line.lower()
-    return any(marker in low for marker in _FAILURE_MARKERS)
-
-
-def _actions_failed(actions: list[str]) -> bool:
-    return any(_is_failure_line(a) for a in actions)
-
-
-def _first_failure(actions: list[str]) -> str:
-    """The first failure line, which names the cause before any follow-up abort."""
-    return next(
-        (a for a in actions if _is_failure_line(a)),
-        actions[-1] if actions else "unknown error",
-    )
-
-
 def _summarize_session_delete(
     targets: list[SessionMeta], actions: list[str]
 ) -> tuple[bool, str]:
-    failed = _actions_failed(actions)
+    failed = actions_failed(actions)
     if failed:
-        err = _first_failure(actions)
+        err = first_failure(actions)
         return False, f"Delete failed: {err}"
     if len(targets) == 1:
         s = targets[0]
@@ -431,9 +403,9 @@ def _summarize_session_delete(
 
 
 def _summarize_project_delete(slugs: list[str], actions: list[str]) -> tuple[bool, str]:
-    failed = _actions_failed(actions)
+    failed = actions_failed(actions)
     if failed:
-        err = _first_failure(actions)
+        err = first_failure(actions)
         return False, f"Project delete failed: {err}"
     if len(slugs) == 1:
         return True, f"Deleted project: {slugs[0]}"
@@ -3027,12 +2999,17 @@ class SessionManagerApp(App[None]):
         keys = [p.key for p in projects]
         slugs = [p.slug for p in projects]
 
+        # Plans (and their live lookups) are built once; only the memory
+        # wording differs between the two toggle states.
+        plans_preview = [
+            provider.plan_project_delete(p.slug, force=True, keep_memory=False)
+            for p in projects
+        ]
+
         def _build(keep: bool) -> tuple[str, list[str]]:
             packed: list[tuple[str, str, object, list[str]]] = []
-            for p in projects:
-                plan = provider.plan_project_delete(
-                    p.slug, force=True, keep_memory=keep
-                )
+            for p, base in zip(projects, plans_preview, strict=True):
+                plan = replace(base, keep_memory=keep)
                 preview = provider.execute_project_delete(
                     plan, dry_run=True, force=True, stop_live=True
                 )

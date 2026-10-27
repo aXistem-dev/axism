@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from axism import version_string
+from axism.actions import actions_failed
 from axism.discover import filter_projects_by_cwd
 from axism.ids import AmbiguousSessionId
 from axism.providers import (
@@ -213,7 +214,7 @@ def cmd_delete(args: argparse.Namespace) -> int:
     )
     for a in actions:
         print(a)
-    return 0
+    return 1 if actions_failed(actions) else 0
 
 
 def cmd_delete_project(args: argparse.Namespace) -> int:
@@ -257,7 +258,7 @@ def cmd_delete_project(args: argparse.Namespace) -> int:
     )
     for a in actions:
         print(a)
-    return 0
+    return 1 if actions_failed(actions) else 0
 
 
 def cmd_resume(args: argparse.Namespace) -> int:
@@ -718,7 +719,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     del_proj.add_argument(
         "target",
-        help="Project slug (e.g. -home-alice-src-demo) or project cwd",
+        help=(
+            "Project cwd, or a project slug (a slug starts with a dash, so "
+            "put -- before it: delete-project -- -home-alice-src-demo)"
+        ),
     )
     del_proj.add_argument("--dry-run", action="store_true")
     del_proj.add_argument("--yes", action="store_true")
