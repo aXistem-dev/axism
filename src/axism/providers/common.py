@@ -36,10 +36,50 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
-def terminate_pid(pid: int, *, grace: float = 1.0) -> tuple[bool, str]:
-    """SIGTERM then SIGKILL a process, waiting briefly in between."""
+def read_cmdline(pid: int) -> str | None:
+    """Command line of one process, or ``None`` when it cannot be read."""
+    try:
+        raw = (Path("/proc") / str(pid) / "cmdline").read_bytes()
+    except OSError:
+        raw = b""
+    if raw:
+        return raw.replace(b"\0", b" ").decode("utf-8", "replace").strip()
+    if Path("/proc").is_dir():
+        return None
+    try:
+        out = subprocess.run(
+            ["ps", "-o", "args=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    text = out.stdout.strip()
+    return text or None
+
+
+def _still_runs(pid: int, expect: str | None) -> bool:
+    if expect is None:
+        return True
+    cmdline = read_cmdline(pid)
+    return cmdline is not None and expect in cmdline
+
+
+def terminate_pid(
+    pid: int, *, grace: float = 1.0, expect: str | None = None
+) -> tuple[bool, str]:
+    """SIGTERM then SIGKILL a process, waiting briefly in between.
+
+    With ``expect``, the command line is re-read right before each signal and
+    the process is left alone if it no longer contains that text (the pid may
+    have been reused).
+    """
     if not pid_alive(pid):
         return True, f"pid {pid} already exited"
+    if not _still_runs(pid, expect):
+        return False, f"pid {pid} no longer runs {expect}"
     try:
         os.kill(pid, signal.SIGTERM)
     except OSError as exc:
@@ -49,6 +89,8 @@ def terminate_pid(pid: int, *, grace: float = 1.0) -> tuple[bool, str]:
         if not pid_alive(pid):
             return True, f"stopped pid {pid} (TERM)"
         time.sleep(0.05)
+    if not _still_runs(pid, expect):
+        return False, f"pid {pid} no longer runs {expect}"
     try:
         os.kill(pid, signal.SIGKILL)
     except OSError as exc:
@@ -108,14 +150,23 @@ def exec_with_cwd(argv: list[str], workdir: str | None) -> None:
     os.execvp(argv[0], argv)
 
 
+_MULTIPLEXERS = frozenset({"tmux", "screen", "zellij"})
+
+
 def find_agent_sessions(
-    session_ids: set[str], binaries: set[str]
+    session_ids: set[str],
+    binaries: set[str],
+    markers: tuple[str, ...] = (),
 ) -> dict[str, int]:
     """Session id → pid of an agent process working on it.
 
-    Matching needs both the agent binary and the id in one command line. aXism's
-    own process is skipped: it carries the id (and often the backend name) in
-    its argv while listing or showing a session.
+    Matching needs both the id and either the agent binary (as a command-line
+    token) or one of ``markers`` (as a substring, for agents started through a
+    launcher that hides the binary name) in one command line. aXism's own
+    process is skipped: it carries the id (and often the backend name) in its
+    argv while listing or showing a session. Terminal multiplexers are skipped
+    too: they carry the agent's command line, and signalling one would take
+    down unrelated work.
     """
     if not session_ids:
         return {}
@@ -128,7 +179,9 @@ def find_agent_sessions(
         names = {os.path.basename(token) for token in tokens}
         if "axism" in names:
             continue
-        if not (names & binaries):
+        if tokens and os.path.basename(tokens[0]).lower().rstrip(":") in _MULTIPLEXERS:
+            continue
+        if not (names & binaries or any(m in cmdline for m in markers)):
             continue
         for session_id in session_ids:
             if session_id in cmdline:

@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Hermes chats started through Hermes' launcher are detected as running, while a terminal multiplexer (tmux, screen, zellij) that merely carries the agent's command line is never mistaken for it or stopped
+- Stopping a Cursor or Hermes chat re-checks that the process still belongs to that chat right before signalling it, so a reused process id is never killed
 - Cursor: moving a project whose workspace is unknown (a `chats-…` entry) now moves its chats instead of failing
 - Cursor and Hermes databases are read correctly when the config path contains characters such as `#` or `?`
 - Cursor: deleting a project that does not exist is refused (even with `--force`) instead of touching the path you typed, and a Cursor project delete only removes inside its own `projects/` and `chats/` folders

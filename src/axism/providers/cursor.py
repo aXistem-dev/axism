@@ -106,7 +106,7 @@ class CursorProvider(ProviderBase):
             live = cursor_live.merge_live({session_id}).get(session_id)
         if live is None or live.pid is None:
             return False, f"no running cursor-agent process for {session_id[:8]}…"
-        return terminate_pid(live.pid)
+        return terminate_pid(live.pid, expect=session_id)
 
     # -- inventory / mutations -------------------------------------------
 

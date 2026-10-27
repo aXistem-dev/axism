@@ -23,6 +23,9 @@ from axism.providers.hermes_store import fragments as hermes_fragments
 from axism.providers.hermes_store import ops as hermes_ops
 from axism.providers.hermes_store.paths import hermes_home, state_db
 
+# Hermes chats run as ``python -c … hermes_cli/main.py …``: no ``hermes`` token.
+HERMES_MARKERS = ("hermes_cli/main.py", "hermes_cli.main")
+
 
 class HermesProvider(ProviderBase):
     """Sessions in ``$HERMES_HOME/state.db`` (``~/.hermes`` on Linux and macOS).
@@ -80,7 +83,9 @@ class HermesProvider(ProviderBase):
                 pid=pid,
                 source="filesystem",
             )
-            for session_id, pid in find_agent_sessions(ids, {hermes_ops.BINARY}).items()
+            for session_id, pid in find_agent_sessions(
+                ids, {hermes_ops.BINARY}, markers=HERMES_MARKERS
+            ).items()
         }
 
     # -- open -------------------------------------------------------------
@@ -115,7 +120,7 @@ class HermesProvider(ProviderBase):
             live = self.merge_live().get(session_id)
         if live is None or live.pid is None:
             return False, f"no running hermes process for {session_id}"
-        return terminate_pid(live.pid)
+        return terminate_pid(live.pid, expect=session_id)
 
     # -- inventory / mutations -------------------------------------------
 
