@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The app's project delete dialog says what happens to the project's `memory/` folder (deleted by default, as on the command line) and `k` keeps it; the line updates as you toggle (Claude Code only)
+- The app reports a delete as failed when a session could not be stopped, was aborted, or a path was refused, instead of showing success
+- `a` in the sessions pane marks only the sessions shown by the current filter, so a filtered delete can no longer remove hidden sessions
+- Deleting the last project clears the selected session and the detail pane, so `o` and `n` no longer act on a session that is gone
+- Narrow terminals (under 70 columns) hide the details pane so both lists stay visible, table columns now count their cell padding so rows no longer scroll sideways, and the first screen uses the real terminal width
+- Left and Right move the text cursor while typing in the session filter instead of switching panes
 - `axism --version` shows a commit suffix only for a source checkout of aXism itself, never for an install that happens to sit inside another git repository
 - The release workflow stops when the tag does not match the package version, and runs the tests and lint before building and publishing
 - Copying a Hermes session to another agent fails cleanly (and exits non-zero) when the Hermes export fails, instead of writing a stub session; a relative `--to` resolves against the current directory, an empty one is an error, and a custom title is carried over from Claude Code transcripts

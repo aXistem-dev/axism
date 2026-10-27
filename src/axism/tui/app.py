@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import platform
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from textual.app import App, ComposeResult
@@ -112,6 +113,18 @@ class ProjectsLayout:
     project_width: int
     agent_width: int = 6
 
+    def column_widths(self) -> list[int]:
+        """Content widths of the visible columns, in display order."""
+        widths = [1]
+        if self.show_agent_col:
+            widths.append(self.agent_width)
+        widths.append(self.project_width)
+        if self.show_count:
+            widths.append(3)
+        if self.show_size:
+            widths.append(5)
+        return widths
+
 
 @dataclass(frozen=True)
 class SessionsLayout:
@@ -124,6 +137,17 @@ class SessionsLayout:
     title_width: int
     updated_width: int = 11
     tags_width: int = 8
+
+    def column_widths(self) -> list[int]:
+        """Content widths of the visible columns, in display order."""
+        widths = [1, self.title_width]
+        if self.show_updated:
+            widths.append(self.updated_width)
+        if self.show_size:
+            widths.append(5)
+        if self.show_tags:
+            widths.append(self.tags_width)
+        return widths
 
 
 def _ellipsis(text: str, max_len: int) -> str:
@@ -170,111 +194,120 @@ def _agent_glyph(provider: str | None) -> str:
     }.get(provider or "", "?")
 
 
+# Every DataTable column adds this much cell padding on top of its content width.
+CELL_PADDING = 2
+# Terminal width below which the detail pane is hidden.
+NARROW_COLUMNS = 70
+
+
 def plan_projects_layout(budget: int, *, multi_agent: bool) -> ProjectsLayout:
-    """Choose projects columns that fit in ``budget`` cells (no h-scroll)."""
-    # Padding for border/cursor chrome inside the DataTable.
-    width = max(8, budget - 1)
-    # Always: Sel(1) + gap. Project absorbs the rest.
-    if width >= 34 and multi_agent:
-        # Sel + Agent(6) + Project + #(3) + Size(5) + gaps
-        fixed = 1 + 6 + 3 + 5 + 4
+    """Choose projects columns that fit in ``budget`` cells (no h-scroll).
+
+    The budget covers content widths plus ``CELL_PADDING`` per visible column.
+    """
+
+    def flex(fixed: list[int], n_cols: int) -> int:
+        return budget - sum(fixed) - CELL_PADDING * n_cols
+
+    # Sel + Agent + Project + # + Size
+    if multi_agent and flex([1, 6, 3, 5], 5) >= 8:
         return ProjectsLayout(
             density="full",
             show_agent_col=True,
             show_count=True,
             show_size=True,
             agent_in_project=False,
-            project_width=max(8, width - fixed),
+            project_width=flex([1, 6, 3, 5], 5),
             agent_width=6,
         )
-    if width >= 28 and multi_agent:
-        fixed = 1 + 6 + 3 + 3
+    # Sel + Agent + Project + #
+    if multi_agent and flex([1, 6, 3], 4) >= 8:
         return ProjectsLayout(
             density="cozy",
             show_agent_col=True,
             show_count=True,
             show_size=False,
             agent_in_project=False,
-            project_width=max(8, width - fixed),
+            project_width=flex([1, 6, 3], 4),
             agent_width=6,
         )
-    if width >= 26 and not multi_agent:
-        fixed = 1 + 3 + 5 + 3
+    # Sel + Project + # + Size
+    if not multi_agent and flex([1, 3, 5], 4) >= 8:
         return ProjectsLayout(
             density="full",
             show_agent_col=False,
             show_count=True,
             show_size=True,
             agent_in_project=False,
-            project_width=max(8, width - fixed),
+            project_width=flex([1, 3, 5], 4),
         )
-    if width >= 20:
-        # Sel + optional "H " prefix in project + count
-        prefix = 2 if multi_agent else 0
-        fixed = 1 + 3 + (2 if multi_agent else 1) + prefix
+    # Sel + Project (with an "H " agent prefix when federated) + #
+    if flex([1, 3], 3) >= 6:
         return ProjectsLayout(
             density="cozy",
             show_agent_col=False,
             show_count=True,
             show_size=False,
             agent_in_project=multi_agent,
-            project_width=max(6, width - fixed),
+            project_width=flex([1, 3], 3),
         )
     # Ultra-tight: mark + project only (agent glyph inlined when federated).
-    prefix = 2 if multi_agent else 0
-    fixed = 1 + 1 + prefix
     return ProjectsLayout(
         density="tight",
         show_agent_col=False,
         show_count=False,
         show_size=False,
         agent_in_project=multi_agent,
-        project_width=max(4, width - fixed),
+        project_width=max(4, flex([1], 2)),
     )
 
 
 def plan_sessions_layout(budget: int) -> SessionsLayout:
-    """Choose sessions columns that fit in ``budget`` cells (no h-scroll)."""
-    width = max(10, budget - 1)
-    if width >= 56:
-        fixed = 1 + 11 + 5 + 10 + 4
+    """Choose sessions columns that fit in ``budget`` cells (no h-scroll).
+
+    The budget covers content widths plus ``CELL_PADDING`` per visible column.
+    """
+
+    def flex(fixed: list[int], n_cols: int) -> int:
+        return budget - sum(fixed) - CELL_PADDING * n_cols
+
+    # Sel + Title + Updated + Size + Tags
+    if flex([1, 11, 5, 10], 5) >= 10:
         return SessionsLayout(
             density="full",
             show_updated=True,
             show_size=True,
             show_tags=True,
-            title_width=max(10, width - fixed),
+            title_width=flex([1, 11, 5, 10], 5),
             updated_width=11,
             tags_width=10,
         )
-    if width >= 40:
-        fixed = 1 + 11 + 5 + 3
+    # Sel + Title + Updated + Size
+    if flex([1, 11, 5], 4) >= 10:
         return SessionsLayout(
             density="cozy",
             show_updated=True,
             show_size=True,
             show_tags=False,
-            title_width=max(10, width - fixed),
+            title_width=flex([1, 11, 5], 4),
             updated_width=11,
         )
-    if width >= 28:
-        # Compact date: MM-DD only
-        fixed = 1 + 5 + 2
+    # Compact date (MM-DD only)
+    if flex([1, 5], 3) >= 8:
         return SessionsLayout(
             density="cozy",
             show_updated=True,
             show_size=False,
             show_tags=False,
-            title_width=max(8, width - fixed),
+            title_width=flex([1, 5], 3),
             updated_width=5,
         )
-    fixed = 1 + 1
     return SessionsLayout(
         density="tight",
         show_updated=False,
         show_size=False,
         show_tags=False,
-        title_width=max(6, width - fixed),
+        title_width=max(6, flex([1], 2)),
     )
 
 
@@ -344,10 +377,32 @@ def _badges(sess: SessionMeta, live: LiveSession | None) -> str:
     return " ".join(tags) if tags else "-"
 
 
+_FAILURE_PREFIXES = ("aborted", "refused:", "error ")
+_FAILURE_MARKERS = (
+    " failed",
+    "still alive",
+    "no longer runs",
+    "stop/kill/rm failed",
+)
+
+
+def _is_failure_line(line: str) -> bool:
+    """True for a backend action line that reports a failed or refused step."""
+    if line.startswith(_FAILURE_PREFIXES):
+        return True
+    low = line.lower()
+    return any(marker in low for marker in _FAILURE_MARKERS)
+
+
 def _actions_failed(actions: list[str]) -> bool:
-    return any(
-        a.startswith(("aborted", "error ")) or " failed" in a.lower()
-        for a in actions
+    return any(_is_failure_line(a) for a in actions)
+
+
+def _first_failure(actions: list[str]) -> str:
+    """The first failure line, which names the cause before any follow-up abort."""
+    return next(
+        (a for a in actions if _is_failure_line(a)),
+        actions[-1] if actions else "unknown error",
     )
 
 
@@ -356,10 +411,7 @@ def _summarize_session_delete(
 ) -> tuple[bool, str]:
     failed = _actions_failed(actions)
     if failed:
-        err = next(
-            (a for a in actions if a.startswith(("aborted", "error "))),
-            actions[-1] if actions else "unknown error",
-        )
+        err = _first_failure(actions)
         return False, f"Delete failed: {err}"
     if len(targets) == 1:
         s = targets[0]
@@ -371,10 +423,7 @@ def _summarize_session_delete(
 def _summarize_project_delete(slugs: list[str], actions: list[str]) -> tuple[bool, str]:
     failed = _actions_failed(actions)
     if failed:
-        err = next(
-            (a for a in actions if a.startswith(("aborted", "error "))),
-            actions[-1] if actions else "unknown error",
-        )
+        err = _first_failure(actions)
         return False, f"Project delete failed: {err}"
     if len(slugs) == 1:
         return True, f"Deleted project: {slugs[0]}"
@@ -436,6 +485,20 @@ def _format_session_delete_confirm(
     return "\n".join(lines), warnings
 
 
+def _memory_line(n_projects: int, keep: bool) -> str:
+    """One sentence saying exactly what happens to each project's ``memory/``."""
+    what = "its memory/ folder" if n_projects == 1 else "their memory/ folders"
+    if keep:
+        return (
+            f"Project memory is KEPT: {what} stays on disk, "
+            "everything else in the project is deleted.  [b]k[/b] to delete it too."
+        )
+    return (
+        f"Project memory is DELETED: {what} is removed with the project.  "
+        "[b]k[/b] to keep it."
+    )
+
+
 def _format_project_delete_confirm(
     projects: list[tuple[str, str, object, list[str]]],
 ) -> tuple[str, list[str]]:
@@ -446,7 +509,7 @@ def _format_project_delete_confirm(
     warnings: list[str] = []
     lines: list[str] = [
         f"[b]{len(projects)} project(s)[/b] will be permanently removed.",
-        "Protected items (credentials, settings, skills, memory) are kept.",
+        "Protected items (credentials, settings, skills) are kept.",
         "",
     ]
     for slug, cwd, plan, preview in projects:
@@ -486,6 +549,7 @@ class ConfirmDeleteScreen(ModalScreen[bool]):
         Binding("y", "confirm", "Yes", show=True, priority=True),
         Binding("n", "cancel", "No", show=True, priority=True),
         Binding("escape", "cancel", "Cancel", show=True, priority=True),
+        Binding("k", "toggle_memory", "Keep memory", show=True, priority=True),
     ]
 
     def __init__(
@@ -496,8 +560,14 @@ class ConfirmDeleteScreen(ModalScreen[bool]):
         warnings: list[str] | None = None,
         confirm_verb: str = "Delete",
         project_danger: bool = False,
+        memory_toggle: Callable[[bool], tuple[str, str]] | None = None,
     ) -> None:
         super().__init__()
+        # ``memory_toggle(keep)`` returns (body, memory line) for the keep state.
+        self.memory_toggle = memory_toggle
+        self.keep_memory = False
+        if memory_toggle is not None:
+            body = memory_toggle(False)[0]
         self.body = body
         self._title = title
         self.warnings = warnings or []
@@ -516,7 +586,7 @@ class ConfirmDeleteScreen(ModalScreen[bool]):
             if not self.warnings:
                 warn = (
                     "!  This removes the whole project directory and linked "
-                    "session fragments (memory unless kept)."
+                    "session fragments."
                 )
         dialog_classes = "-project-danger" if self.project_danger else ""
         yield Vertical(
@@ -525,6 +595,11 @@ class ConfirmDeleteScreen(ModalScreen[bool]):
                 warn,
                 id="confirm-warn",
                 classes="-empty" if not warn else "",
+            ),
+            Static(
+                self.memory_toggle(False)[1] if self.memory_toggle else "",
+                id="confirm-memory",
+                classes="" if self.memory_toggle else "-empty",
             ),
             VerticalScroll(
                 Static(self.body, id="confirm-body"),
@@ -551,6 +626,22 @@ class ConfirmDeleteScreen(ModalScreen[bool]):
 
     def action_cancel(self) -> None:
         self.dismiss(False)
+
+    def check_action(
+        self, action: str, parameters: tuple[object, ...]
+    ) -> bool | None:
+        if action == "toggle_memory" and self.memory_toggle is None:
+            return False
+        return True
+
+    def action_toggle_memory(self) -> None:
+        if self.memory_toggle is None:
+            return
+        self.keep_memory = not self.keep_memory
+        body, line = self.memory_toggle(self.keep_memory)
+        self.body = body
+        self.query_one("#confirm-body", Static).update(body)
+        self.query_one("#confirm-memory", Static).update(line)
 
 
 # Full legend for the help screen (order = importance for this app).
@@ -584,6 +675,7 @@ HELP_LEGEND = """[b $accent]aXism keys[/]
   d / D             Projects pane: delete project(s)
                     Sessions/Detail: delete session(s)
   y / n / Esc       Confirm or cancel in dialogs
+  k                 Project delete dialog: keep project memory (default: deleted)
 
 [b $warning]App[/]
   r / R             Refresh session list
@@ -1135,6 +1227,16 @@ class SessionManagerApp(App[None]):
         min-width: 20;
         padding: 0 1;
     }
+    /* Below 70 columns: drop the detail pane so projects + sessions both fit. */
+    .-narrow #detail {
+        display: none;
+    }
+    .-narrow #projects {
+        min-width: 10;
+    }
+    .-narrow #sessions-pane {
+        min-width: 16;
+    }
     #sessions {
         height: 1fr;
         border: none;
@@ -1294,6 +1396,19 @@ class SessionManagerApp(App[None]):
         padding: 0 1;
         border: solid $warning;
     }
+    #confirm-memory {
+        padding: 0 1;
+        margin-bottom: 1;
+        border: solid $warning;
+        text-style: bold;
+    }
+    #confirm-memory.-empty {
+        display: none;
+        height: 0;
+        margin: 0;
+        padding: 0;
+        border: none;
+    }
     #confirm-warn.-empty {
         display: none;
         height: 0;
@@ -1358,8 +1473,8 @@ class SessionManagerApp(App[None]):
         # Tab cycles right→left (detail → sessions → projects); arrows stay spatial.
         Binding("tab", "focus_previous", "Pane", show=True),
         Binding("shift+tab", "focus_next", "Pane", show=False),
-        Binding("right", "focus_next", "Pane", show=False, priority=True),
-        Binding("left", "focus_previous", "Pane", show=False, priority=True),
+        Binding("right", "pane_right", "Pane", show=False, priority=True),
+        Binding("left", "pane_left", "Pane", show=False, priority=True),
         Binding("space", "toggle_select", "Select", show=True),
         Binding("a", "select_all", "All", show=False),
         Binding("A", "select_all", "All", show=False),
@@ -1449,7 +1564,13 @@ class SessionManagerApp(App[None]):
         detail.border_title = "Detail"
         self.theme_changed_signal.subscribe(self, self._on_theme_changed)
         self._sync_pane_focus_classes()
+        self._sync_narrow_class()
         self.action_refresh()
+        # The first pass runs before the tables have a real size; plan again.
+        self.call_after_refresh(self._refit_tables)
+
+    def _sync_narrow_class(self) -> None:
+        self.set_class(self.size.width < NARROW_COLUMNS, "-narrow")
 
     def _multi_agent(self) -> bool:
         return len(self.providers) > 1
@@ -1515,6 +1636,14 @@ class SessionManagerApp(App[None]):
         """Refit list columns when the terminal or pane widths change."""
         if not self.is_mounted or len(self.screen_stack) > 1:
             return
+        self._sync_narrow_class()
+        self._refit_tables()
+        # Pane widths settle after the class change has been laid out.
+        self.call_after_refresh(self._refit_tables)
+
+    def _refit_tables(self) -> None:
+        if not self.is_mounted or len(self.screen_stack) > 1:
+            return
         try:
             self.query_one("#projects", DataTable)
             self.query_one("#sessions", DataTable)
@@ -1550,6 +1679,9 @@ class SessionManagerApp(App[None]):
         if len(self.screen_stack) > 1:
             return False
         pane = self._focus_pane()
+        if action in {"pane_left", "pane_right"} and isinstance(self.focused, Input):
+            # Left/Right belong to the text cursor while typing in a field.
+            return False
         if action == "toggle_select" and pane == "detail":
             return False
         if action == "toggle_select" and isinstance(self.focused, Input):
@@ -1596,6 +1728,12 @@ class SessionManagerApp(App[None]):
             else:
                 return False
         return True
+
+    def action_pane_right(self) -> None:
+        self.action_focus_next()
+
+    def action_pane_left(self) -> None:
+        self.action_focus_previous()
 
     def _focus_pane(self) -> str:
         """Return which main pane owns focus: projects | sessions | detail | other."""
@@ -1910,7 +2048,9 @@ class SessionManagerApp(App[None]):
             self._reload_sessions_table()
         else:
             self.selected_project = None
+            self.selected_session = None
             self.query_one("#sessions", DataTable).clear()
+            self._update_sessions_meta()
             roots = roots_summary(self.providers) or str(self.root)
             self.query_one("#detail", Static).update(
                 "[b]No projects found[/b]\n\n"
@@ -2148,7 +2288,7 @@ class SessionManagerApp(App[None]):
         if pane in {"sessions", "detail"}:
             if not self.selected_project:
                 return
-            for s in self.selected_project.sessions:
+            for s in self._visible_sessions():
                 self.selected_session_ids.add(s.key)
             self._update_session_marks()
 
@@ -2862,28 +3002,35 @@ class SessionManagerApp(App[None]):
                 f"{provider.label} cannot delete projects", success=False, seconds=4
             )
             return
-        packed: list[tuple[str, str, object, list[str]]] = []
-        for p in projects:
-            plan = provider.plan_project_delete(
-                p.slug, force=True, keep_memory=False
-            )
-            preview = provider.execute_project_delete(
-                plan, dry_run=True, force=True, stop_live=True
-            )
-            packed.append((p.slug, p.cwd_guess, plan, preview))
-        body, warnings = _format_project_delete_confirm(packed)
+        has_memory = provider.capabilities.memory_merge
         keys = [p.key for p in projects]
         slugs = [p.slug for p in projects]
+
+        def _build(keep: bool) -> tuple[str, list[str]]:
+            packed: list[tuple[str, str, object, list[str]]] = []
+            for p in projects:
+                plan = provider.plan_project_delete(
+                    p.slug, force=True, keep_memory=keep
+                )
+                preview = provider.execute_project_delete(
+                    plan, dry_run=True, force=True, stop_live=True
+                )
+                packed.append((p.slug, p.cwd_guess, plan, preview))
+            return _format_project_delete_confirm(packed)
+
+        body, warnings = _build(False)
+        screen_ref: list[ConfirmDeleteScreen] = []
 
         def _after(confirmed: bool | None) -> None:
             if not confirmed:
                 self._set_status("Project delete cancelled")
                 self._show_toast("Project delete cancelled", success=False, seconds=2.5)
                 return
+            keep = screen_ref[0].keep_memory if screen_ref else False
             all_actions: list[str] = []
             for slug in slugs:
                 plan_exec = provider.plan_project_delete(
-                    slug, force=True, keep_memory=False
+                    slug, force=True, keep_memory=keep
                 )
                 actions = provider.execute_project_delete(
                     plan_exec,
@@ -2901,25 +3048,25 @@ class SessionManagerApp(App[None]):
             self._show_toast(msg, success=ok)
 
         n = len(projects)
-        self.push_screen(
-            ConfirmDeleteScreen(
-                body,
-                title=(
-                    f"Delete {n} project{'s' if n != 1 else ''}"
-                    if n != 1
-                    else "Delete project"
-                ),
-                warnings=warnings
-                + [
-                    f"Deletes via {provider.label}.",
-                    "Deletes the backend's project directory and linked session data.",
-                    "Source workspace files on disk are not moved or removed.",
-                ],
-                confirm_verb="Delete",
-                project_danger=True,
-            ),
-            _after,
+
+        def _memory(keep: bool) -> tuple[str, str]:
+            return _build(keep)[0], _memory_line(n, keep)
+
+        screen = ConfirmDeleteScreen(
+            body,
+            title=f"Delete {n} projects" if n != 1 else "Delete project",
+            warnings=warnings
+            + [
+                f"Deletes via {provider.label}.",
+                "Deletes the backend's project directory and linked session data.",
+                "Source workspace files on disk are not moved or removed.",
+            ],
+            confirm_verb="Delete",
+            project_danger=True,
+            memory_toggle=_memory if has_memory else None,
         )
+        screen_ref.append(screen)
+        self.push_screen(screen, _after)
 
     def _confirm_delete_sessions(self, targets: list[SessionMeta]) -> None:
         if not targets:

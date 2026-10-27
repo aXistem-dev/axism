@@ -28,7 +28,7 @@ def test_projects_layout_densities():
     assert cozy.show_agent_col
     assert not cozy.show_size
 
-    tight = plan_projects_layout(16, multi_agent=True)
+    tight = plan_projects_layout(12, multi_agent=True)
     assert tight.density == "tight"
     assert not tight.show_agent_col
     assert tight.agent_in_project
@@ -52,3 +52,14 @@ def test_agent_glyph():
     assert _agent_glyph("hermes") == "H"
     assert _agent_glyph("claude_code") == "A"
     assert _agent_glyph("cursor") == "C"
+
+
+def test_column_plans_budget_includes_cell_padding():
+    for budget in (18, 38, 78):
+        for multi in (False, True):
+            p = plan_projects_layout(budget, multi_agent=multi)
+            widths = p.column_widths()
+            assert sum(widths) + 2 * len(widths) <= budget, (budget, multi, p)
+        s = plan_sessions_layout(budget)
+        widths = s.column_widths()
+        assert sum(widths) + 2 * len(widths) <= budget, (budget, s)

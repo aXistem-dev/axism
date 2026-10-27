@@ -60,7 +60,7 @@ The app has three panes: **projects**, **sessions**, and **details**. Use `Tab` 
 | `?` or `h` | All keys (refresh, themes, version info, and more) |
 | `q` | Quit |
 
-Keys act on the pane you are in. For example, `d` in the projects pane deletes whole projects, while `d` in the sessions pane deletes sessions. If items are marked, the action applies to all of them. If an agent cannot do something, aXism tells you instead of doing half the job.
+Terminals narrower than 70 columns hide the details pane so projects and sessions both fit. Keys act on the pane you are in. For example, `d` in the projects pane deletes whole projects, while `d` in the sessions pane deletes sessions. If items are marked, the action applies to all of them. If an agent cannot do something, aXism tells you instead of doing half the job.
 
 **Moving.** Press `m`, then pick an existing project or type a folder path. Within the same agent, aXism moves the session files and updates their recorded paths. It creates the destination folder if needed, but it never moves your source code. Stop running sessions before moving them. Moving a session into another agent's project copies the conversation text and keeps the original.
 
@@ -120,7 +120,7 @@ All three agents support open, stop, rename, and delete. Differences:
 
 Deleting a session never removes credentials (`auth.json`, `.credentials.json`, `.env`), agent config (`settings.json`, `config.yaml`, `cli-config.json`), skills, plugins, daemon keys, project `memory/`, or an agent's whole database (such as Hermes `state.db`).
 
-Deleting a project removes every session in it along with the agent's folder for that project. For Claude Code that includes the project's `memory/` unless you pass `--keep-memory`.
+Deleting a project removes every session in it along with the agent's folder for that project. For Claude Code that includes the project's `memory/` unless you pass `--keep-memory`; in the app, the project delete dialog states what happens to `memory/` and `k` toggles keeping it (off by default).
 
 ## Development
 

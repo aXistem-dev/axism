@@ -1,0 +1,321 @@
+"""Textual pilot tests for the TUI against synthetic Claude Code fixtures."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+
+import pytest
+from conftest import DEMO_SLUG, SESSION_A, SESSION_B, build_fake_config
+from textual.widgets import DataTable, Input
+
+import axism.tui.app as tui
+from axism.tui.app import ConfirmDeleteScreen, SessionManagerApp
+
+
+def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, fake: bool = True) -> Path:
+    claude = tmp_path / "claude"
+    claude.mkdir()
+    if fake:
+        build_fake_config(claude)
+    cfg = tmp_path / "axcfg"
+    cfg.mkdir()
+    (cfg / "settings.json").write_text(
+        json.dumps(
+            {
+                "active_provider": "claude_code",
+                "providers": {
+                    "claude_code": {"enabled": True, "config_dir": str(claude)},
+                    "cursor": {"enabled": False, "config_dir": str(tmp_path / "cur")},
+                    "hermes": {"enabled": False, "config_dir": str(tmp_path / "her")},
+                },
+            }
+        )
+    )
+    monkeypatch.setenv("AXISM_CONFIG_DIR", str(cfg))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude))
+    real = tui.federate_merge_live
+    monkeypatch.setattr(
+        tui, "federate_merge_live", lambda provs, use_cli=True: real(provs, use_cli=False)
+    )
+    return claude
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+# ---- E2 -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "aborted: could not stop live session (11111111)",
+        "aborted: some reason",
+        "aborted 11111111: some reason",
+        "aborted: project kept because a live session could not be stopped",
+        "refused: /x/y outside /x/projects",
+        "refused: /x/y outside the session stores",
+        "kill(123) failed: boom",
+        "SIGKILL 123 failed: boom",
+        "pid 123 still alive after KILL",
+        "stop/kill: stop/kill/rm failed",
+        "11111111: stop: pid 5 no longer runs claude",
+        "stop/kill: pid 5 no longer runs claude",
+        "error removing /x: nope",
+    ],
+)
+def test_actions_failed_detects_failure_lines(line):
+    assert tui._actions_failed(["removed a", line])
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "removed /x/y",
+        "would remove project dir /x (10 B)",
+        "stop/kill: stopped pid 5 (TERM)",
+        "11111111: stop: pid 5 already exited",
+        "nothing to delete",
+    ],
+)
+def test_actions_failed_ignores_success_lines(line):
+    assert not tui._actions_failed([line])
+
+
+def test_summaries_name_the_failure_line():
+    ok, msg = tui._summarize_session_delete(
+        [], ["stop/kill: kill(5) failed: x", "aborted: could not stop live session"]
+    )
+    assert not ok and "Delete failed" in msg
+    ok, msg = tui._summarize_project_delete(["s"], ["refused: /a outside /b"])
+    assert not ok and "refused" in msg
+
+
+# ---- E1 -------------------------------------------------------------------
+
+
+def test_project_delete_default_removes_memory(tmp_path, monkeypatch):
+    claude = _setup(tmp_path, monkeypatch)
+    proj = claude / "projects" / DEMO_SLUG
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            app.query_one("#projects").focus()
+            await pilot.pause()
+            await pilot.press("d")
+            await pilot.pause()
+            assert isinstance(app.screen, ConfirmDeleteScreen)
+            text = str(app.screen.query_one("#confirm-memory").render())
+            assert "memory/" in text and "DELETED" in text
+            await pilot.press("y")
+            await pilot.pause()
+            await pilot.pause()
+
+    _run(main())
+    assert not proj.exists()
+
+
+def test_project_delete_keep_memory_toggle(tmp_path, monkeypatch):
+    claude = _setup(tmp_path, monkeypatch)
+    proj = claude / "projects" / DEMO_SLUG
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            app.query_one("#projects").focus()
+            await pilot.pause()
+            await pilot.press("d")
+            await pilot.pause()
+            line = app.screen.query_one("#confirm-memory")
+            body = app.screen.query_one("#confirm-body")
+            before = (str(line.render()), str(body.render()))
+            assert "DELETED" in before[0]
+            await pilot.press("k")
+            await pilot.pause()
+            after = (str(line.render()), str(body.render()))
+            assert "KEPT" in after[0]
+            assert "keeping memory/" in after[1]
+            assert before[1] != after[1]
+            await pilot.press("k")
+            await pilot.pause()
+            assert "DELETED" in str(line.render())
+            await pilot.press("k")
+            await pilot.pause()
+            await pilot.press("y")
+            await pilot.pause()
+            await pilot.pause()
+
+    _run(main())
+    assert (proj / "memory" / "MEMORY.md").is_file()
+    assert not (proj / f"{SESSION_A}.jsonl").exists()
+
+
+# ---- E3 -------------------------------------------------------------------
+
+
+def test_select_all_marks_only_visible_sessions(tmp_path, monkeypatch):
+    claude = _setup(tmp_path, monkeypatch)
+    proj = claude / "projects" / DEMO_SLUG
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            app.query_one("#sessions").focus()
+            await pilot.pause()
+            app._session_filter = "Demo session A"
+            app._reload_sessions_table()
+            await pilot.pause()
+            assert [s.session_id for s in app._visible_sessions()] == [SESSION_A]
+            await pilot.press("a")
+            await pilot.pause()
+            assert {s.session_id for s in app._target_sessions_for_delete()} == {SESSION_A}
+            await pilot.press("d")
+            await pilot.pause()
+            await pilot.press("y")
+            await pilot.pause()
+            await pilot.pause()
+
+    _run(main())
+    assert not (proj / f"{SESSION_A}.jsonl").exists()
+    assert (proj / f"{SESSION_B}.jsonl").exists()
+
+
+# ---- E4 -------------------------------------------------------------------
+
+
+def test_empty_project_list_clears_selection(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            app.query_one("#projects").focus()
+            await pilot.pause()
+            await pilot.press("d")
+            await pilot.pause()
+            await pilot.press("y")
+            await pilot.pause()
+            await pilot.pause()
+            assert app.projects == []
+            assert app.selected_session is None
+            assert app.selected_project is None
+            detail = str(app.query_one("#detail").render())
+            assert "Demo session" not in detail
+            app.query_one("#sessions").focus()
+            await pilot.pause()
+            await pilot.press("o")
+            await pilot.pause()
+            assert app.return_value is None
+            assert len(app.screen_stack) == 1
+            await pilot.press("n")
+            await pilot.pause()
+            assert len(app.screen_stack) == 1
+
+    _run(main())
+
+
+# ---- E5 / E7 --------------------------------------------------------------
+
+
+def test_narrow_terminal_shows_projects_and_sessions(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(60, 30)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            proj = app.query_one("#projects").region
+            sess = app.query_one("#sessions-pane").region
+            assert proj.width > 0 and sess.width > 0
+            assert sess.x < 60
+            assert sess.right <= 60
+            assert not app.query_one("#detail").display
+            for tid in ("#projects", "#sessions"):
+                table = app.query_one(tid, DataTable)
+                assert table.virtual_size.width <= table.size.width
+
+    _run(main())
+
+
+def test_wide_terminal_keeps_detail_pane(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            assert app.query_one("#detail").display
+
+    _run(main())
+
+
+def test_initial_layout_uses_real_width(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(200, 40)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            assert app._projects_layout is not None
+            assert app._projects_layout.density == "full"
+            assert app._projects_layout == app._compute_projects_layout()
+            assert app._sessions_layout == app._compute_sessions_layout()
+
+    _run(main())
+
+
+# ---- E8 -------------------------------------------------------------------
+
+
+def test_left_right_in_input_moves_cursor_not_pane(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            app.query_one("#sessions").focus()
+            await pilot.pause()
+            await pilot.press("slash")
+            await pilot.pause()
+            flt = app.query_one("#sessions-filter", Input)
+            assert app.focused is flt
+            await pilot.press("a", "b", "c")
+            await pilot.pause()
+            assert flt.cursor_position == 3
+            await pilot.press("left")
+            await pilot.pause()
+            assert app.focused is flt
+            assert flt.cursor_position == 2
+            await pilot.press("right")
+            await pilot.pause()
+            assert app.focused is flt
+            assert flt.cursor_position == 3
+
+    _run(main())
+
+
+def test_left_right_still_switch_panes_without_input(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            app.query_one("#sessions").focus()
+            await pilot.pause()
+            await pilot.press("left")
+            await pilot.pause()
+            assert app._focus_pane() == "projects"
+
+    _run(main())
