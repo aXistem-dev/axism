@@ -5,12 +5,13 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from axism.actions import STOP_ABORT_PREFIX, project_kept_line
 from axism.delete import DeletePlan, ProjectDeletePlan
 from axism.discover import ProjectInfo, SessionMeta
 from axism.fragments import PROTECTED_NAMES, FragmentInventory, is_safe_id
 from axism.live import LiveSession
 from axism.move import MoveResult
-from axism.paths import path_size
+from axism.paths import path_size, strictly_inside
 from axism.providers.base import Capabilities, ProviderBase
 from axism.providers.common import (
     exec_with_cwd,
@@ -231,6 +232,13 @@ class CursorProvider(ProviderBase):
             )
 
         project_path = projects_dir(root) / project.slug
+        if project_path.is_symlink():
+            return ProjectDeletePlan(
+                slug=project.slug,
+                project_path=project_path,
+                blocked_reason=f"refused: {project_path} is a symlink",
+                hard_blocked=True,
+            )
         plan = ProjectDeletePlan(
             slug=project.slug,
             project_path=project_path,
@@ -283,11 +291,11 @@ class CursorProvider(ProviderBase):
                     stop_live=stop_live,
                 )
             )
-            if any(
-                a.startswith("aborted: could not stop live session") for a in actions
-            ):
+            if any(a.startswith(STOP_ABORT_PREFIX) for a in actions):
                 actions.append(
-                    "aborted: project kept because a live session could not be stopped"
+                    project_kept_line(
+                        len(plan.session_plans), actions, has_project_dir=True
+                    )
                 )
                 return actions
 
@@ -295,14 +303,17 @@ class CursorProvider(ProviderBase):
         pdir = projects_dir(root)
         cdir = chats_dir(root)
         for target in [plan.project_path, *plan.extra_paths]:
+            if target.is_symlink():
+                actions.append(f"refused: {target} is a symlink")
+                continue
             if not (
-                _strictly_inside(target, pdir) or _strictly_inside(target, cdir)
+                strictly_inside(target, [pdir, cdir])
             ):
                 actions.append(f"refused: {target} outside {pdir} and {cdir}")
                 continue
             if not target.is_dir():
                 continue
-            if _strictly_inside(target, pdir):
+            if strictly_inside(target, [pdir]):
                 actions.extend(_remove_project_dir(target, dry_run=dry_run))
             elif dry_run:
                 actions.append(f"would remove {target} ({path_size(target)} B)")
@@ -315,16 +326,6 @@ class CursorProvider(ProviderBase):
 
 
 KEPT_PROJECT_ENTRIES = PROTECTED_NAMES | {".workspace-trusted"}
-
-
-def _strictly_inside(path: Path, base: Path) -> bool:
-    """True when ``path`` resolves to a descendant of ``base``, never ``base``."""
-    try:
-        resolved = path.resolve()
-        root = base.resolve()
-    except OSError:
-        return False
-    return resolved != root and root in resolved.parents
 
 
 def _remove_project_dir(project: Path, *, dry_run: bool) -> list[str]:

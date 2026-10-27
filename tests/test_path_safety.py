@@ -29,3 +29,12 @@ def test_project_delete_refuses_symlink_escape(fake_root: Path, tmp_path: Path):
     # Resolved path is outside projects/ → blocked
     assert plan.can_delete is False
     assert plan.blocked_reason and "outside" in plan.blocked_reason
+
+
+def test_trailing_newline_is_not_a_safe_id():
+    from axism.fragments import _slug_ok, is_safe_id
+
+    assert is_safe_id("abc-123")
+    assert not is_safe_id("abc-123\n")
+    assert _slug_ok("-home-alice-src-demo")
+    assert not _slug_ok("-home-alice-src-demo\n")

@@ -410,7 +410,10 @@ def test_failed_stop_aborts_cursor_delete_even_with_force(
             source="filesystem",
         )
     actions = provider.execute_project_delete(pplan, dry_run=False, force=True)
-    assert "aborted: project kept because a live session could not be stopped" in actions
+    assert (
+        "aborted: project folder kept because a live session could not be stopped; "
+        "0 other session(s) deleted"
+    ) in actions
     assert (root / "projects" / project.slug).is_dir()
 
 
@@ -472,3 +475,25 @@ def test_symlinked_agent_store_is_unlinked_not_followed(
     provider.execute_deletes([plan], dry_run=False)
     assert (victim / "keep.txt").exists()
     assert not (stores / AGENT_ONLY).is_symlink()
+
+
+def test_symlinked_project_dir_is_refused_and_target_survives(
+    cursor_env: tuple[Path, str]
+):
+    root, _ = cursor_env
+    provider = CursorProvider()
+    slug = provider.discover()[0].slug
+    real = root / "projects" / "real-b"
+    (root / "projects" / slug).rename(real)
+    (root / "projects" / slug).symlink_to(real, target_is_directory=True)
+
+    plan = provider.plan_project_delete(slug, force=True)
+    assert plan.hard_blocked and "symlink" in (plan.blocked_reason or "")
+    actions = provider.execute_project_delete(plan, dry_run=False, force=True)
+    assert actions[0].startswith("aborted")
+    assert any(real.rglob("*.jsonl"))
+
+    bare = ProjectDeletePlan(slug=slug, project_path=root / "projects" / slug)
+    actions = provider.execute_project_delete(bare, dry_run=False, force=True)
+    assert f"refused: {root / 'projects' / slug} is a symlink" in actions
+    assert any(real.rglob("*.jsonl"))

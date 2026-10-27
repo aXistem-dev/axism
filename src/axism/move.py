@@ -86,10 +86,15 @@ def _project_real_cwd(project: ProjectInfo, typed: str | None) -> str:
     """Real cwd of an existing project, never a slug-decoded guess when avoidable.
 
     The slug encoding is lossy. Prefer the newest transcript ``cwd`` that differs
-    from the decoded guess, then the typed path, then the guess.
+    from the decoded guess and encodes back to the project slug, then the typed
+    path, then the guess.
     """
     for s in project.sessions:  # newest first
-        if s.cwd and s.cwd != project.cwd_guess:
+        if (
+            s.cwd
+            and s.cwd != project.cwd_guess
+            and encode_project_slug(s.cwd) == project.slug
+        ):
             return s.cwd
     return typed or project.cwd_guess
 

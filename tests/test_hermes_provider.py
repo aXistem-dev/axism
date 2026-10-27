@@ -359,7 +359,9 @@ def test_workspace_delete_keeps_going_never_when_stop_fails(
         sp.live = _live(sp.session_id)
     actions = provider.execute_project_delete(plan, dry_run=False, force=True)
     assert any(a.startswith("aborted: could not stop live session") for a in actions)
-    assert "aborted: project kept because a live session could not be stopped" in actions
+    assert (
+        "aborted: a live session could not be stopped; 0 other session(s) deleted"
+    ) in actions
     assert calls == []
     assert provider.plan_project_delete("/nowhere", force=True).hard_blocked
 
@@ -419,3 +421,43 @@ def test_hermes_fragments_outside_the_legacy_dirs_are_refused(
     actions = HermesProvider().execute_deletes([plan], dry_run=False, force=True)
     assert sum(a.startswith("refused: ") for a in actions) == 2
     assert outside.exists() and (root / "sessions").is_dir()
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_failed_cli_delete_is_a_failure_and_keeps_legacy_files(
+    hermes_env: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, force: bool
+):
+    from axism.actions import actions_failed
+
+    root, _ = hermes_env
+    legacy = root / "sessions"
+    legacy.mkdir()
+    legacy_file = legacy / f"session_{CLI_SESSION}.json"
+    legacy_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        hermes_ops, "run_hermes", lambda *_a, **_k: (1, "hermes: no such session")
+    )
+    provider = HermesProvider()
+    plan = provider.plan_delete(CLI_SESSION, force=force)
+    actions = provider.execute_deletes([plan], dry_run=False, force=force)
+    assert actions_failed(actions), actions
+    assert any("no such session" in a for a in actions)
+    assert legacy_file.exists()
+
+
+def test_project_delete_reports_how_many_other_sessions_went(
+    hermes_env: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+):
+    _root, workspace = hermes_env
+    monkeypatch.setattr(hermes_ops, "run_hermes", lambda *_a, **_k: (0, "deleted"))
+    monkeypatch.setattr("axism.live._live_pid", lambda *_a, **_k: True)
+    provider = HermesProvider()
+    monkeypatch.setattr(provider, "stop", lambda sid, live=None: (False, "stuck"))
+    plan = provider.plan_project_delete(workspace, force=True)
+    total = len(plan.session_plans)
+    plan.session_plans[0].live = _live(plan.session_plans[0].session_id)
+    actions = provider.execute_project_delete(plan, dry_run=False, force=True)
+    assert (
+        "aborted: a live session could not be stopped; "
+        f"{total - 1} other session(s) deleted"
+    ) in actions

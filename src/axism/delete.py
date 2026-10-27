@@ -8,9 +8,10 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from axism.actions import STOP_ABORT_PREFIX, project_kept_line
 from axism.fragments import FragmentInventory, collect_fragments
 from axism.live import LiveSession, kill_live_session, merge_live
-from axism.paths import config_root, is_session_uuid
+from axism.paths import config_root, is_session_uuid, strictly_inside
 
 
 @dataclass
@@ -80,6 +81,18 @@ def build_delete_plan(
         _proj, sess = found
         full_id = sess.session_id
         project_slug = project_slug or sess.project_slug
+    else:
+        from axism.discover import find_session
+
+        if not find_session(session_id, root):
+            orphan = collect_fragments(session_id, project_slug=project_slug, root=root)
+            if not orphan.deletable:
+                return DeletePlan(
+                    session_id=session_id,
+                    inventory=orphan,
+                    blocked_reason="session not found",
+                    hard_blocked=True,
+                )
 
     inv = collect_fragments(full_id, project_slug=project_slug, root=root)
     live_map = merge_live(root, use_cli=use_cli)
@@ -132,28 +145,6 @@ def _rewrite_history(history_path: Path, session_id: str) -> int:
     return removed
 
 
-def _strictly_inside(path: Path, roots: list[Path]) -> bool:
-    """True when ``path`` lies below (never equal to) one of ``roots``.
-
-    The final component is not resolved, so a symlink counts as the link itself.
-    """
-    try:
-        parent = path.parent.resolve()
-    except (OSError, RuntimeError):
-        return False
-    if path.name in {"", ".", ".."}:
-        return False
-    target = parent / path.name
-    for root in roots:
-        try:
-            r = root.resolve()
-        except (OSError, RuntimeError):
-            continue
-        if target != r and r in target.parents:
-            return True
-    return False
-
-
 _PROJECT_KINDS = frozenset({"transcript", "session_dir", "bridge_pointer"})
 
 
@@ -167,10 +158,10 @@ def _fragment_ok(frag, root: Path) -> bool:
     from axism.paths import projects_dir, tmp_claude_roots
 
     if frag.kind in _PROJECT_KINDS:
-        return _strictly_inside(frag.path, [projects_dir(root)])
+        return strictly_inside(frag.path, [projects_dir(root)])
     if frag.kind == "tmp_scratch":
-        return _strictly_inside(frag.path, tmp_claude_roots())
-    if not _strictly_inside(frag.path, [root]):
+        return strictly_inside(frag.path, tmp_claude_roots())
+    if not strictly_inside(frag.path, [root]):
         return False
     try:
         pdir = projects_dir(root).resolve()
@@ -181,7 +172,7 @@ def _fragment_ok(frag, root: Path) -> bool:
 
 
 def _guarded_remove(path: Path, roots: list[Path]) -> str:
-    if not _strictly_inside(path, roots):
+    if not strictly_inside(path, roots):
         return f"refused: {path} outside {', '.join(str(r) for r in roots[:1])}"
     return _remove_path(path)
 
@@ -499,6 +490,15 @@ def build_project_delete_plan(
             hard_blocked=True,
         )
 
+    if project_path.is_symlink():
+        return ProjectDeletePlan(
+            slug=slug,
+            project_path=project_path,
+            blocked_reason=f"refused: {project_path} is a symlink",
+            keep_memory=keep_memory,
+            hard_blocked=True,
+        )
+
     info = discover_project(project_path)
     session_plans = [
         build_delete_plan(
@@ -571,8 +571,10 @@ def execute_project_delete(
         )
     )
 
-    if any(a.startswith("aborted: could not stop live session") for a in actions):
-        actions.append("aborted: project kept because a live session could not be stopped")
+    if any(a.startswith(STOP_ABORT_PREFIX) for a in actions):
+        actions.append(
+            project_kept_line(len(plan.session_plans), actions, has_project_dir=True)
+        )
         return actions
 
     memory_path = plan.project_path / "memory"

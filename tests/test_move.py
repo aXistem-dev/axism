@@ -336,3 +336,23 @@ def test_session_move_rewrites_subagent_transcripts(fake_root: Path):
         fake_root / "projects" / OTHER_SLUG / SESSION_A / "subagents" / "agent-cafe.jsonl"
     )
     assert OTHER_CWD in moved.read_text()
+
+
+def test_project_real_cwd_ignores_a_cwd_that_does_not_encode_to_the_slug():
+    from types import SimpleNamespace
+
+    from axism.move import _project_real_cwd
+
+    project = SimpleNamespace(
+        slug=DEMO_SLUG,
+        cwd_guess=DEMO_CWD,
+        sessions=[SimpleNamespace(cwd="/home/alice/elsewhere")],
+    )
+    assert _project_real_cwd(project, "/home/alice/src/demo") == "/home/alice/src/demo"
+    assert _project_real_cwd(project, None) == DEMO_CWD
+    good = SimpleNamespace(
+        slug="-home-alice-src-my-app",
+        cwd_guess="/home/alice/src/my/app",
+        sessions=[SimpleNamespace(cwd="/home/alice/src/my-app")],
+    )
+    assert _project_real_cwd(good, None) == "/home/alice/src/my-app"

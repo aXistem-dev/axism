@@ -6,6 +6,11 @@ import os
 import shutil
 from pathlib import Path
 
+from axism.actions import (
+    CLI_DELETE_FAILED_PREFIX,
+    STOP_ABORT_PREFIX,
+    project_kept_line,
+)
 from axism.delete import DeletePlan, ProjectDeletePlan
 from axism.discover import ProjectInfo, SessionMeta
 from axism.fragments import FragmentInventory, is_safe_id
@@ -242,9 +247,12 @@ class HermesProvider(ProviderBase):
                 )
             else:
                 ok, msg = hermes_ops.delete_session(root, plan.session_id)
-                actions.append(f"{plan.session_id}: {msg}")
-                if not ok and not force:
+                if not ok:
+                    actions.append(
+                        f"{CLI_DELETE_FAILED_PREFIX} {plan.session_id} failed: {msg}"
+                    )
                     continue
+                actions.append(f"{plan.session_id}: {msg}")
             legacy_roots = [root / "sessions", root / "webui" / "sessions"]
             for frag in plan.inventory.deletable:
                 if not strictly_inside(frag.path, legacy_roots):
@@ -313,8 +321,10 @@ class HermesProvider(ProviderBase):
         actions = self.execute_deletes(
             plan.session_plans, dry_run=dry_run, force=force, stop_live=stop_live
         )
-        if any(a.startswith("aborted: could not stop live session") for a in actions):
+        if any(a.startswith(STOP_ABORT_PREFIX) for a in actions):
             actions.append(
-                "aborted: project kept because a live session could not be stopped"
+                project_kept_line(
+                    len(plan.session_plans), actions, has_project_dir=False
+                )
             )
         return actions

@@ -283,3 +283,52 @@ def test_guard_is_per_root(fake_root):
     actions = execute_delete(plan, root=fake_root, dry_run=False)
     assert len([a for a in actions if a.startswith("refused: ")]) == 4
     assert (fake_root / "projects" / DEMO_SLUG).is_dir()
+
+
+def test_unknown_full_uuid_is_hard_blocked(fake_root):
+    ghost = "99999999-9999-9999-9999-999999999999"
+    plan = build_delete_plan(ghost, root=fake_root, use_cli=False)
+    assert plan.hard_blocked and plan.blocked_reason == "session not found"
+
+
+def test_orphan_fragments_of_a_missing_uuid_can_still_be_cleaned(fake_root):
+    ghost = "99999999-9999-9999-9999-999999999999"
+    (fake_root / "uploads" / ghost).mkdir(parents=True)
+    plan = build_delete_plan(ghost, root=fake_root, use_cli=False)
+    assert not plan.hard_blocked and plan.can_delete
+    assert plan.inventory.deletable
+
+
+def test_project_delete_reports_kept_folder_and_other_sessions(
+    fake_root, monkeypatch
+):
+    from axism.live import LiveSession
+
+    live = LiveSession(session_id=SESSION_A, kind="interactive", state="busy", pid=4242)
+    monkeypatch.setattr("axism.live._live_pid", lambda *_a, **_k: True)
+    monkeypatch.setattr(
+        "axism.delete.kill_live_session", lambda *a, **k: (False, "stuck")
+    )
+    plan = build_project_delete_plan(DEMO_SLUG, root=fake_root, force=True, use_cli=False)
+    total = len(plan.session_plans)
+    for sp in plan.session_plans:
+        if sp.session_id == SESSION_A:
+            sp.live = live
+    actions = execute_project_delete(plan, root=fake_root, dry_run=False, force=True)
+    assert (
+        "aborted: project folder kept because a live session could not be stopped; "
+        f"{total - 1} other session(s) deleted"
+    ) in actions
+    assert (fake_root / "projects" / DEMO_SLUG).is_dir()
+
+
+def test_symlinked_project_dir_is_refused_and_target_survives(fake_root):
+    projects = fake_root / "projects"
+    link = projects / "a"
+    link.symlink_to(projects / DEMO_SLUG, target_is_directory=True)
+    plan = build_project_delete_plan("a", root=fake_root, force=True, use_cli=False)
+    assert plan.hard_blocked
+    assert "symlink" in (plan.blocked_reason or "")
+    actions = execute_project_delete(plan, root=fake_root, dry_run=False, force=True)
+    assert actions and actions[0].startswith("aborted")
+    assert (projects / DEMO_SLUG / f"{SESSION_A}.jsonl").exists()

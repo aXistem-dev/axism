@@ -46,12 +46,12 @@ SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 def is_safe_id(value: str | None) -> bool:
     """True for a plain id / slug usable as a single path component."""
-    return isinstance(value, str) and bool(SAFE_ID_RE.match(value))
+    return isinstance(value, str) and bool(SAFE_ID_RE.fullmatch(value))
 
 
 def _slug_ok(slug: str) -> bool:
     # Project slugs start with '-' (encoded leading slash) and contain no separators.
-    return bool(re.match(r"^[A-Za-z0-9_.-]+$", slug)) and slug not in {".", ".."}
+    return bool(re.fullmatch(r"[A-Za-z0-9_.-]+", slug)) and slug not in {".", ".."}
 
 
 @dataclass

@@ -100,3 +100,25 @@ def path_size(path: Path) -> int:
     except OSError:
         return 0
     return 0
+
+
+def strictly_inside(path: Path, roots: list[Path]) -> bool:
+    """True when ``path`` lies below (never equal to) one of ``roots``.
+
+    The final component is not resolved, so a symlink counts as the link itself.
+    """
+    try:
+        parent = path.parent.resolve()
+    except (OSError, RuntimeError):
+        return False
+    if path.name in {"", ".", ".."}:
+        return False
+    target = parent / path.name
+    for root in roots:
+        try:
+            r = root.resolve()
+        except (OSError, RuntimeError):
+            continue
+        if target != r and r in target.parents:
+            return True
+    return False

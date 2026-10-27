@@ -14,8 +14,8 @@ import time
 from pathlib import Path
 
 from axism.delete import DeletePlan
-from axism.delete import _strictly_inside as strictly_inside
 from axism.live import LiveSession
+from axism.paths import strictly_inside
 
 
 def remove_path(path: Path) -> str:
