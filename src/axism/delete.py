@@ -154,10 +154,30 @@ def _strictly_inside(path: Path, roots: list[Path]) -> bool:
     return False
 
 
-def _removal_roots(root: Path) -> list[Path]:
-    from axism.paths import tmp_claude_roots
+_PROJECT_KINDS = frozenset({"transcript", "session_dir", "bridge_pointer"})
 
-    return [root, *tmp_claude_roots()]
+
+def _fragment_ok(frag, root: Path) -> bool:
+    """A fragment may only be removed from the root it belongs to.
+
+    Transcripts, session dirs and bridge pointers live below ``projects/``,
+    tmp scratch below a tmp root, everything else below the config root but
+    never inside ``projects/`` itself.
+    """
+    from axism.paths import projects_dir, tmp_claude_roots
+
+    if frag.kind in _PROJECT_KINDS:
+        return _strictly_inside(frag.path, [projects_dir(root)])
+    if frag.kind == "tmp_scratch":
+        return _strictly_inside(frag.path, tmp_claude_roots())
+    if not _strictly_inside(frag.path, [root]):
+        return False
+    try:
+        pdir = projects_dir(root).resolve()
+        target = frag.path.parent.resolve() / frag.path.name
+    except (OSError, RuntimeError):
+        return False
+    return target != pdir and pdir not in target.parents
 
 
 def _guarded_remove(path: Path, roots: list[Path]) -> str:
@@ -235,9 +255,8 @@ def execute_delete(
         plan.actions = actions
         return actions
 
-    roots = _removal_roots(root)
     for frag in plan.inventory.deletable:
-        if not _strictly_inside(frag.path, roots):
+        if not _fragment_ok(frag, root):
             actions.append(f"refused: {frag.path} outside {root}")
             continue
         if frag.kind == "history_lines":
@@ -292,7 +311,6 @@ def execute_deletes(
 
     history_ids: list[str] = []
     history_path: Path | None = None
-    roots = _removal_roots(root)
 
     for plan in plans:
         stop_lines = _stop_live_if_needed(
@@ -308,7 +326,7 @@ def execute_deletes(
             continue
 
         for frag in plan.inventory.deletable:
-            if not _strictly_inside(frag.path, roots):
+            if not _fragment_ok(frag, root):
                 actions.append(f"refused: {frag.path} outside {root}")
                 continue
             if frag.kind == "history_lines":

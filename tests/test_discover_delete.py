@@ -266,3 +266,20 @@ def test_custom_title_beats_ai_title(fake_root):
     )
     _p, sess = find_session(STEM, fake_root)
     assert sess.title == "MINE"
+
+
+def test_guard_is_per_root(fake_root):
+    from axism.fragments import Fragment
+
+    plan = build_delete_plan(
+        SESSION_A, project_slug=DEMO_SLUG, root=fake_root, use_cli=False
+    )
+    plan.inventory.fragments = [
+        Fragment("uploads", fake_root / "projects", 0),
+        Fragment("uploads", fake_root / "projects" / DEMO_SLUG, 0),
+        Fragment("transcript", fake_root / "uploads", 0),
+        Fragment("tmp_scratch", fake_root / "projects" / DEMO_SLUG, 0),
+    ]
+    actions = execute_delete(plan, root=fake_root, dry_run=False)
+    assert len([a for a in actions if a.startswith("refused: ")]) == 4
+    assert (fake_root / "projects" / DEMO_SLUG).is_dir()

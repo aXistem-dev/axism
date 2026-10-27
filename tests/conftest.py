@@ -145,3 +145,16 @@ def fake_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root = build_fake_config(tmp_path)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(root))
     return root
+
+
+@pytest.fixture(autouse=True)
+def _pinned_tmp_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Never resolve scratch roots to the machine's real temp dirs."""
+    scratch = tmp_path / "claude-scratch-root"
+    for target in (
+        "axism.paths.tmp_claude_roots",
+        "axism.fragments.tmp_claude_roots",
+        "axism.move.tmp_claude_roots",
+    ):
+        monkeypatch.setattr(target, lambda: [scratch])
+    return scratch
