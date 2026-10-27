@@ -1,6 +1,6 @@
 # Agent instructions for aXism
 
-**aXism** (*Agent Interactive Session Manager*) is a TUI + CLI session manager for Claude Code, Cursor, and Hermes. Keep the product name and binary **`axism`** agent-agnostic.
+**aXism** (*Agent Interactive Session Manager*) by aXistem is a TUI + CLI session manager for Claude Code, Cursor, and Hermes. Keep the product name and binary **`axism`** agent-agnostic.
 
 ## Stack
 

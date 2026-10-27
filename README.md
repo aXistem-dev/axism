@@ -136,4 +136,4 @@ See [AGENTS.md](https://github.com/aXistem-dev/axism/blob/main/AGENTS.md) for co
 
 ## License
 
-[MIT](https://github.com/aXistem-dev/axism/blob/main/LICENSE) © aXism contributors
+[MIT](https://github.com/aXistem-dev/axism/blob/main/LICENSE) © aXistem

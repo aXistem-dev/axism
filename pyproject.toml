@@ -5,7 +5,7 @@ description = "aXism — Agent Interactive Session Manager (TUI + CLI)"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.12"
-authors = [{ name = "aXism contributors" }]
+authors = [{ name = "aXistem" }]
 keywords = ["ai", "sessions", "tui", "agents", "claude-code", "axism"]
 dependencies = [
   "textual>=1.0.0",
