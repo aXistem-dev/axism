@@ -7,49 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `k` in the project delete dialog keeps the project's `memory/` folder (Claude Code); the dialog says whether it will be deleted or kept and updates as you toggle
+- `axism move` refuses sessions (and projects containing sessions) that are running, as the app does; `--force` overrides
+- A slug that starts with a dash is passed after `--`, for example `axism delete-project -- -home-alice-src-demo`
+
 ### Changed
 
-- `delete` and `delete-project` without `--yes` or `--dry-run` now print the preview and exit 1; an explicit `--dry-run` exits 0, and a blocked plan exits 2 in every mode (including `--dry-run --yes`)
-- Responsive projects/sessions tables: density modes (full/cozy/tight), flex pane ratios with min-widths, agent glyph inlined when narrow, and horizontal scrollbars disabled so small terminals stay keyboard-friendly
+- Exit codes for `delete` and `delete-project`: without `--yes` or `--dry-run` they print the preview and exit 1; an explicit `--dry-run` exits 0; a blocked plan (not found, or a live session without `--force`) exits 2 in every mode; a `--yes` run that reports an aborted, refused or failed step exits 1
+- aXistem is named as author and copyright holder
+- Responsive projects/sessions tables: density modes (full/cozy/tight), flex pane ratios with minimum widths, the agent glyph inlined when narrow, and horizontal scrollbars disabled so small terminals stay keyboard-friendly
+- Narrow terminals (under 70 columns) hide the details pane so both lists stay visible, table columns count their cell padding so rows no longer scroll sideways, and the first screen uses the real terminal width
+- A config directory chosen in Settings also applies to the Claude Code commands aXism runs (stop, purge, live listing, open/resume), so they act on the same sessions you see
+- The release workflow stops when the tag does not match `pyproject.toml` or `__version__`, and runs the tests, lint and anonymity check before building and publishing
+- README links (License, CI workflow, AGENTS.md, CHANGELOG.md) use absolute GitHub URLs so they resolve from the PyPI project page
 
 ### Fixed
 
-- The app's project delete dialog says what happens to the project's `memory/` folder (deleted by default, as on the command line) and `k` keeps it; the line updates as you toggle (Claude Code only)
-- The app reports a delete as failed when a session could not be stopped, was aborted, or a path was refused, instead of showing success
-- `a` in the sessions pane marks only the sessions shown by the current filter, so a filtered delete can no longer remove hidden sessions
-- Deleting the last project clears the selected session and the detail pane, so `o` and `n` no longer act on a session that is gone
-- Narrow terminals (under 70 columns) hide the details pane so both lists stay visible, table columns now count their cell padding so rows no longer scroll sideways, and the first screen uses the real terminal width
-- Left and Right move the text cursor while typing in the session filter instead of switching panes
-- `axism --version` shows a commit suffix only for a source checkout of aXism itself, never for an install that happens to sit inside another git repository
-- The release workflow stops when the tag does not match the package version, and runs the tests and lint before building and publishing
-- Copying a Hermes session to another agent fails cleanly (and exits non-zero) when the Hermes export fails, instead of writing a stub session; a relative `--to` resolves against the current directory, an empty one is an error, and a custom title is carried over from Claude Code transcripts
-- `axism move` refuses sessions (and projects containing sessions) that are running, as the TUI does; `--force` overrides
-- `--config-dir` works when the saved active backend is unknown or disabled (it falls back to Claude Code like a plain run), and a settings file that is not valid UTF-8 or has a non-boolean `enabled` no longer breaks startup
-- Cursor and Hermes: session ids that are not plain ids (`.`, `..`, empty, containing `/`) match nothing and are refused even with `--force`; only paths strictly inside the session stores are removed, and a symlinked session file or store is unlinked without touching what it points to
-- Hermes: commands run against the configured Hermes home are pinned to its default profile, so a sticky active profile can no longer redirect a rename, delete or resume to another profile; renaming to a title that starts with `-` works
-- Cursor and Hermes: if a live chat cannot be stopped, its delete aborts (with or without `--force`), a project delete keeps the project, and deleting a session or workspace that does not exist is refused even with `--force`
-- Hermes chats started through Hermes' launcher are detected as running, while a terminal multiplexer (tmux, screen, zellij) that merely carries the agent's command line is never mistaken for it or stopped
-- Stopping a Cursor or Hermes chat re-checks that the process still belongs to that chat right before signalling it, so a reused process id is never killed
-- Cursor: moving a project whose workspace is unknown (a `chats-…` entry) now moves its chats instead of failing
-- Cursor and Hermes databases are read correctly when the config path contains characters such as `#` or `?`
-- Cursor: deleting a project that does not exist is refused (even with `--force`) instead of touching the path you typed, and a Cursor project delete only removes inside its own `projects/` and `chats/` folders
-- Cursor: deleting a project keeps its credentials and agent config (`mcp-auth.json`, `mcps/`, …) and removes the folder only when nothing is left
-- A live-session record is trusted only while its process start time still matches, so a reused process id is never listed as live or signalled; duplicate records for one session prefer a running one, then the newest
-- If a live session cannot be stopped, its delete aborts with `aborted: could not stop live session` and nothing of it is removed, with or without `--force`
+#### Delete safety
+
+- A session that cannot be stopped is never deleted: its delete aborts with `aborted: could not stop live session` and nothing of it is removed, with or without `--force`. A project delete then keeps the project folder and reports how many other sessions were deleted
+- A session or project that does not exist is refused even with `--force`, in every backend; this includes a full session id with nothing left on disk, while leftover files of a missing session can still be cleaned up
+- Session ids that are not plain ids (`.`, `..`, empty, containing `/` or a line break) match nothing, and deleting a project by `.`, `..`, `/` or an unknown target reports "project not found"
+- Deletes only remove paths strictly inside the backend's own roots (anything else is reported as `refused:`). Symlinked files, stores and project folders are never followed: a symlinked file or store is unlinked without touching its target, and a symlinked project folder is refused
+- A live-session record is trusted only while its process start time still matches, so a reused process id is never listed as live or signalled; duplicate records for one session prefer a running one, then the newest. Stopping a Cursor or Hermes chat re-checks the process right before signalling it
+- Deleting a Hermes session fails (and keeps its legacy files) when the `hermes` command fails, instead of reporting success
+- Deleting a Cursor project keeps its credentials and agent config (`mcp-auth.json`, `mcps/`, ...) and removes the folder only when nothing is left
 - A session is identified by its transcript file name, so a transcript that mentions another session id is listed and deleted under its own id
-- A title set with rename always wins over a generated title
-- Renaming a session whose transcript ends mid-line starts a fresh line, so the new title is read back
+- A session id prefix that matches several sessions is refused with the list of matching ids (exit code 2), so `delete`, `rename` and similar commands never touch the wrong session
+
+#### App
+
+- The app reports a delete as failed when a session could not be stopped, was aborted, or a path was refused, instead of showing success
+- `a` in the sessions pane marks only the sessions shown by the current filter, so a filtered delete cannot remove hidden sessions
+- Deleting the last project clears the selected session and the detail pane, so `o` and `n` no longer act on a session that is gone
+- Left and Right move the text cursor while typing in the session filter instead of switching panes
+- Toggling `k` in the project delete dialog no longer re-queries running sessions
+
+#### Backends
+
+- Hermes: commands run against the configured Hermes home use its default profile, so a sticky active profile cannot redirect a rename, delete or resume; renaming to a title that starts with `-` works
+- Hermes chats started through Hermes' launcher are detected as running, while a terminal multiplexer (tmux, screen, zellij) that merely carries the agent's command line is never mistaken for one
+- Cursor: moving a project whose workspace is unknown (a `chats-...` entry) moves its chats instead of failing
+- Cursor and Hermes databases are read correctly when the config path contains characters such as `#` or `?`
+- Copying a Hermes session to another agent fails cleanly (and exits non-zero) when the Hermes export fails, instead of writing a stub session; a relative `--to` resolves against the current directory, an empty one is an error, and a custom title is carried over from Claude Code transcripts
+- `--config-dir` works when the saved active backend is unknown or disabled (it falls back to Claude Code like a plain run), and a settings file that is not valid UTF-8 or has a non-boolean `enabled` no longer breaks startup
+
+#### Moving, renaming and discovery
+
+- Moving sessions into an existing project uses that project's real working directory, taken from its transcripts only when it encodes back to the project folder name, so no stray directory is created
+- Moving a transcript that contains a lone emoji surrogate completes instead of failing and leaving a temp file
+- Moving or renaming also updates the working directory in subagent transcripts, and renaming a project checks the destination workspace first so a failure leaves it untouched
+- A title set with rename always wins over a generated title, and renaming a session whose transcript ends mid-line starts a fresh line so the new title is read back
 - Malformed (non-object) JSON in live-session, job and bridge files is skipped instead of crashing discovery
-- Deleting a project by `.` or a path resolves it to the matching project only; empty, `..`, `/` or unknown targets are reported as "project not found" and are never overridden by `--force`
-- Deletes only remove paths strictly inside the projects, config or scratch roots (anything else is reported as `refused:`), and session ids that are not plain ids match nothing
-- Symlinked session fragments are unlinked without touching what they point to
-- A session id prefix that matches several sessions is refused with the list of matching ids (exit code 2) instead of acting on the first match, so `delete`, `rename` and similar commands never touch the wrong session
-- Moving sessions into an existing project whose folder name contains a hyphen uses that project's real working directory instead of a guessed one, so no stray directory is created
-- Moving a transcript that contains a lone emoji surrogate (`\ud83d`) now completes instead of failing and leaving a temp file
-- Renaming a project checks the destination workspace first, so a failure leaves the project untouched
-- Moving or renaming also updates the working directory in subagent transcripts
-- A config directory chosen in Settings now also applies to the Claude Code commands aXism runs (stop, purge, live listing, open/resume), so they act on the same sessions you see
-- README links (License, CI workflow, AGENTS.md, CHANGELOG.md) now use absolute GitHub URLs so they resolve correctly from the PyPI project page instead of only working on GitHub
+- `axism --version` shows a commit suffix only for a source checkout of aXism itself, never for an install that sits inside another git repository
 
 ## [0.1.1] — 2026-09-23
 
