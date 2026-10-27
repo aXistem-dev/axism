@@ -74,6 +74,8 @@ def load_filesystem_live(root: Path | None = None) -> dict[str, LiveSession]:
             data = json.loads(entry.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
+        if not isinstance(data, dict):
+            continue
         sid = data.get("sessionId")
         if not isinstance(sid, str):
             continue
@@ -107,6 +109,8 @@ def load_job_states(root: Path | None = None) -> dict[str, LiveSession]:
         try:
             data = json.loads(state_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict):
             continue
         sid = data.get("sessionId") or data.get("resumeSessionId")
         if not isinstance(sid, str):

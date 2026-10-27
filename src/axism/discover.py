@@ -124,6 +124,7 @@ def parse_transcript_meta(path: Path, *, max_scan_bytes: int = 2_000_000) -> dic
         return meta
 
     text = "\n".join(chunks)
+    titles: dict[str, str] = {}
     for line in text.splitlines():
         line = line.strip()
         if not line or line[0] != "{":
@@ -134,17 +135,13 @@ def parse_transcript_meta(path: Path, *, max_scan_bytes: int = 2_000_000) -> dic
             continue
         if not isinstance(obj, dict):
             continue
-        sid = obj.get("sessionId")
-        if isinstance(sid, str):
-            meta["session_id"] = sid
         t = obj.get("type")
         if t == "ai-title" and isinstance(obj.get("title"), str):
-            meta["title"] = obj["title"]
+            titles["ai"] = obj["title"]
         elif t == "custom-title" and isinstance(obj.get("customTitle"), str):
-            meta["title"] = obj["customTitle"]
+            titles["custom"] = obj["customTitle"]
         elif t == "agent-name" and isinstance(obj.get("agentName"), str):
-            if not meta["title"]:
-                meta["title"] = obj["agentName"]
+            titles["agent"] = obj["agentName"]
         elif t == "bridge-session":
             meta["has_bridge"] = True
         if obj.get("bridgeSessionId"):
@@ -162,6 +159,8 @@ def parse_transcript_meta(path: Path, *, max_scan_bytes: int = 2_000_000) -> dic
             # Skip slash-command-only noise when possible, but keep something
             if prompt:
                 meta["first_prompt"] = prompt[:240]
+    # A user-set title always beats a generated one, whatever the record order.
+    meta["title"] = titles.get("custom") or titles.get("ai") or titles.get("agent")
     return meta
 
 
@@ -193,7 +192,7 @@ def discover_project(slug_dir: Path) -> ProjectInfo:
             size = path_size(entry) + (path_size(subdir) if has_subdir else 0)
             info.sessions.append(
                 SessionMeta(
-                    session_id=parsed.get("session_id") or entry.stem,
+                    session_id=entry.stem,
                     project_slug=slug,
                     cwd=parsed.get("cwd") or info.cwd_guess,
                     title=parsed.get("title"),

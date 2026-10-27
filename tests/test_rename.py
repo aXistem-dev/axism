@@ -24,3 +24,16 @@ def test_rename_rejects_empty(fake_root: Path):
     ok, msg = rename_session(SESSION_A, "   ", root=fake_root)
     assert ok is False
     assert "empty" in msg.lower()
+
+
+def test_rename_after_torn_last_line(fake_root):
+    from axism.discover import find_session
+    from axism.rename import rename_session
+
+    _p, sess = find_session("11111111", fake_root)
+    with sess.transcript_path.open("a", encoding="utf-8") as fh:
+        fh.write('{"type":"user","mess')
+    ok, _msg = rename_session(sess.session_id, "Fresh", root=fake_root)
+    assert ok
+    _p, again = find_session("11111111", fake_root)
+    assert again.title == "Fresh"

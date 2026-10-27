@@ -224,3 +224,45 @@ def test_symlinked_fragment_unlinks_link_only(fake_root, tmp_path):
     import shutil
 
     shutil.rmtree(target)
+
+
+# --- discover robustness ---
+
+STEM = "44444444-4444-4444-4444-444444444444"
+
+
+def _write_transcript(root, name, rows):
+    from tests.conftest import write_jsonl
+
+    write_jsonl(root / "projects" / DEMO_SLUG / f"{name}.jsonl", rows)
+
+
+def test_session_id_is_filename_stem(fake_root):
+    _write_transcript(
+        fake_root,
+        STEM,
+        [{"type": "user", "sessionId": SESSION_B, "message": {"content": "hi"}}],
+    )
+    sessions = [s for p in discover_all(fake_root) for s in p.sessions]
+    ids = {s.session_id for s in sessions}
+    assert STEM in ids
+    assert len([s for s in sessions if s.session_id == SESSION_B]) == 1
+    plan = build_delete_plan(
+        STEM, project_slug=DEMO_SLUG, root=fake_root, use_cli=False
+    )
+    execute_delete(plan, root=fake_root, dry_run=False)
+    assert not (fake_root / "projects" / DEMO_SLUG / f"{STEM}.jsonl").exists()
+    assert (fake_root / "projects" / DEMO_SLUG / f"{SESSION_B}.jsonl").is_file()
+
+
+def test_custom_title_beats_ai_title(fake_root):
+    _write_transcript(
+        fake_root,
+        STEM,
+        [
+            {"type": "custom-title", "customTitle": "MINE", "sessionId": STEM},
+            {"type": "ai-title", "title": "AI", "sessionId": STEM},
+        ],
+    )
+    _p, sess = find_session(STEM, fake_root)
+    assert sess.title == "MINE"

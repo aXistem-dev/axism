@@ -42,8 +42,16 @@ def rename_session(
         "sessionId": sess.session_id,
     }
     try:
+        with path.open("rb") as rfh:
+            size = rfh.seek(0, 2)
+            if size:
+                rfh.seek(size - 1)
+                torn = rfh.read(1) != b"\n"
+            else:
+                torn = False
         with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+            # A torn last line would swallow the record; start a fresh line.
+            fh.write(("\n" if torn else "") + json.dumps(record, ensure_ascii=False) + "\n")
     except OSError as exc:
         return False, f"failed to write transcript: {exc}"
 

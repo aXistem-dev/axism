@@ -73,3 +73,28 @@ def test_is_killable_requires_alive_pid(monkeypatch):
     assert live.is_killable is False
     monkeypatch.setattr("axism.live._pid_alive", lambda pid: True)
     assert live.is_killable is True
+
+
+def test_non_dict_json_is_skipped(tmp_path):
+    from axism.fragments import collect_fragments
+    from axism.live import load_filesystem_live, load_job_states, merge_live
+
+    sdir = tmp_path / "sessions"
+    sdir.mkdir()
+    (sdir / "1.json").write_text("[]")
+    (sdir / "2.json").write_text('"x"')
+    job = tmp_path / "jobs" / "abcd1234"
+    job.mkdir(parents=True)
+    (job / "state.json").write_text("[]")
+    proj = tmp_path / "projects" / "-home-alice-x"
+    proj.mkdir(parents=True)
+    (proj / "bridge-pointer.json").write_text('"x"')
+    assert load_filesystem_live(tmp_path) == {}
+    assert load_job_states(tmp_path) == {}
+    assert merge_live(tmp_path, use_cli=False) == {}
+    inv = collect_fragments(
+        "abcd1234-0000-0000-0000-000000000000",
+        project_slug="-home-alice-x",
+        root=tmp_path,
+    )
+    assert {f.kind for f in inv.fragments} <= {"jobs"}

@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A session is identified by its transcript file name, so a transcript that mentions another session id is listed and deleted under its own id
+- A title set with rename always wins over a generated title
+- Renaming a session whose transcript ends mid-line starts a fresh line, so the new title is read back
+- Malformed (non-object) JSON in live-session, job and bridge files is skipped instead of crashing discovery
 - Deleting a project by `.` or a path resolves it to the matching project only; empty, `..`, `/` or unknown targets are reported as "project not found" and are never overridden by `--force`
 - Deletes only remove paths strictly inside the projects, config or scratch roots (anything else is reported as `refused:`), and session ids that are not plain ids match nothing
 - Symlinked session fragments are unlinked without touching what they point to
