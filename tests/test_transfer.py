@@ -113,3 +113,92 @@ def test_import_to_claude_and_cursor(tmp_path: Path):
     dry = transfer_session(claude, cursor, sess, dest_cwd, dry_run=True)
     assert dry.ok
     assert "dry-run" in dry.message.lower() or "dry-run" in " ".join(dry.actions)
+
+
+def _session(path: Path, sid: str, cwd: str, provider: str) -> SessionMeta:
+    return SessionMeta(
+        session_id=sid,
+        project_slug="-home-alice-src-demo",
+        cwd=cwd,
+        title="Demo cross",
+        first_prompt=None,
+        transcript_path=path,
+        mtime=1.0,
+        size_bytes=10,
+        provider=provider,
+    )
+
+
+def test_hermes_export_failure_leaves_destination_untouched(
+    tmp_path: Path, monkeypatch
+):
+    from axism.providers.hermes_store import ops as hermes_ops
+
+    monkeypatch.setattr(
+        hermes_ops, "run_hermes", lambda *a, **k: (1, "hermes exploded")
+    )
+    hermes_home = tmp_path / "hermes"
+    hermes_home.mkdir()
+    claude_home = tmp_path / "claude"
+    claude_home.mkdir()
+    source = get_provider("hermes", config_dir=hermes_home)
+    dest = get_provider("claude_code", config_dir=claude_home)
+    sess = _session(tmp_path / "x", "20260101_000000_abcdef", "/home/alice/src/demo", "hermes")
+
+    result = transfer_session(source, dest, sess, "/home/alice/src/other")
+
+    assert result.ok is False
+    assert "hermes exploded" in result.message
+    assert not list(claude_home.rglob("*"))
+
+
+def test_relative_destination_resolves_against_cwd(tmp_path: Path, monkeypatch):
+    sid = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    path = tmp_path / "src.jsonl"
+    _sample_claude_jsonl(path, sid, "/home/alice/src/demo")
+    sess = _session(path, sid, "/home/alice/src/demo", "claude_code")
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    cursor_home = tmp_path / "cursor"
+    cursor_home.mkdir()
+    claude_home = tmp_path / "claude"
+    claude_home.mkdir()
+    source = get_provider("claude_code", config_dir=claude_home)
+    dest = get_provider("cursor", config_dir=cursor_home)
+
+    result = transfer_session(source, dest, sess, "sub/project")
+
+    assert result.ok, result.message
+    assert result.dest_cwd == str((work / "sub" / "project").resolve())
+
+
+def test_empty_destination_is_an_error(tmp_path: Path):
+    sid = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+    path = tmp_path / "src.jsonl"
+    _sample_claude_jsonl(path, sid, "/home/alice/src/demo")
+    sess = _session(path, sid, "/home/alice/src/demo", "claude_code")
+    claude_home = tmp_path / "claude"
+    claude_home.mkdir()
+    cursor_home = tmp_path / "cursor"
+    cursor_home.mkdir()
+    source = get_provider("claude_code", config_dir=claude_home)
+    dest = get_provider("cursor", config_dir=cursor_home)
+
+    for empty in ("", "   "):
+        result = transfer_session(source, dest, sess, empty)
+        assert result.ok is False
+        assert "destination" in result.message.lower()
+    assert not list(cursor_home.rglob("*"))
+
+
+def test_export_reads_custom_title_key(tmp_path: Path):
+    sid = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+    path = tmp_path / "src.jsonl"
+    rows = [
+        {"type": "custom-title", "customTitle": "From customTitle", "sessionId": sid},
+        {"type": "user", "message": {"role": "user", "content": "hi"}},
+    ]
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    sess = _session(path, sid, "/home/alice/src/demo", "claude_code")
+    assert export_claude_jsonl(path, session=sess).title == "From customTitle"

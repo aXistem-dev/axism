@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from axism.discover import SessionMeta
-from axism.move import MoveResult, normalize_dest_cwd
+from axism.move import MoveResult
 from axism.paths import encode_project_slug
 from axism.paths import projects_dir as claude_projects_dir
 from axism.providers.base import SessionProvider
@@ -48,6 +48,7 @@ class CanonicalTranscript:
     source_provider: str
     source_session_id: str
     turns: list[Turn] = field(default_factory=list)
+    export_error: str = ""  # non-empty: the source could not be read; do not import
 
     def summary(self) -> str:
         return (
@@ -72,6 +73,23 @@ class TransferResult:
             actions=list(self.actions),
             dest_cwd=self.dest_cwd,
         )
+
+
+def resolve_dest_cwd(dest: str) -> str:
+    """Absolute destination cwd; relative paths resolve against the current directory.
+
+    Empty or blank input returns ``""`` (callers treat that as an error).
+    """
+    text = (dest or "").strip()
+    if not text:
+        return ""
+    path = Path(text).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    try:
+        return str(path.resolve())
+    except OSError:
+        return str(path)
 
 
 def _extract_text(content: object) -> str:
@@ -139,7 +157,11 @@ def export_claude_jsonl(path: Path, *, session: SessionMeta) -> CanonicalTranscr
             continue
         typ = obj.get("type")
         if typ == "custom-title":
-            t = obj.get("title") or (obj.get("message") or {}).get("content")
+            t = (
+                obj.get("customTitle")
+                or obj.get("title")
+                or (obj.get("message") or {}).get("content")
+            )
             if isinstance(t, str) and t.strip():
                 title = t.strip()
             continue
@@ -176,7 +198,7 @@ def export_cursor_jsonl(path: Path, *, session: SessionMeta) -> CanonicalTranscr
 def export_hermes_session(
     provider: SessionProvider, session: SessionMeta
 ) -> CanonicalTranscript:
-    """Prefer ``hermes sessions export --format trace``; fall back to empty turns."""
+    """Export via ``hermes sessions export --format trace``; failures set ``export_error``."""
     root = provider.config_root()
     with tempfile.TemporaryDirectory(prefix="axism-hermes-export-") as tmp:
         out = Path(tmp) / "trace.jsonl"
@@ -200,21 +222,13 @@ def export_hermes_session(
             if not canonical.title or canonical.title == session.session_id:
                 canonical.title = session.display_title
             return canonical
-        # Soft failure: still return metadata so import can seed a stub.
         return CanonicalTranscript(
             title=session.display_title,
             cwd=session.cwd,
             source_provider="hermes",
             source_session_id=session.session_id,
-            turns=[
-                Turn(
-                    role="user",
-                    content=(
-                        f"(Hermes export failed: {msg or 'unknown error'}. "
-                        f"Stub session for {session.session_id}.)"
-                    ),
-                )
-            ],
+            turns=[],
+            export_error=f"Hermes export failed: {msg or 'unknown error'}",
         )
 
 
@@ -393,7 +407,7 @@ def _write_temp_claude_for_hermes(
     tmp = Path(tempfile.mkdtemp(prefix="axism-import-"))
     fake_root = tmp / "claude-home"
     fake_root.mkdir()
-    cwd = normalize_dest_cwd(dest_cwd) or dest_cwd or canonical.cwd or str(tmp / "workspace")
+    cwd = resolve_dest_cwd(dest_cwd) or canonical.cwd or str(tmp / "workspace")
     # Stamp dest into the canonical so titles/metadata stay coherent.
     stamped = CanonicalTranscript(
         title=canonical.title,
@@ -415,7 +429,13 @@ def import_to_provider(
     *,
     dry_run: bool = False,
 ) -> TransferResult:
-    dest_cwd = normalize_dest_cwd(dest_cwd) or dest_cwd
+    dest_cwd = resolve_dest_cwd(dest_cwd)
+    if not dest_cwd:
+        return TransferResult(
+            ok=False,
+            message="Destination path is empty",
+            dest_provider=dest.name,
+        )
     actions: list[str] = [
         f"export {canonical.summary()}",
         f"import → {dest.name} @ {dest_cwd}",
@@ -540,6 +560,13 @@ def transfer_session(
             dest_cwd=dest_cwd,
         )
     canonical = export_session(source, session)
+    if canonical.export_error:
+        return TransferResult(
+            ok=False,
+            message=canonical.export_error,
+            dest_provider=dest.name,
+            dest_cwd=resolve_dest_cwd(dest_cwd),
+        )
     if title and title.strip():
         canonical.title = title.strip()
     elif allow_same_provider and source.name == dest.name:
@@ -602,7 +629,7 @@ def transfer_sessions(
                 message=result.message,
                 actions=actions,
                 dest_provider=dest.name,
-                dest_cwd=normalize_dest_cwd(dest_cwd) or dest_cwd,
+                dest_cwd=resolve_dest_cwd(dest_cwd),
             )
         if result.new_session_id:
             ids.append(result.new_session_id)
@@ -614,7 +641,7 @@ def transfer_sessions(
         actions=actions,
         new_session_id=ids[0] if len(ids) == 1 else "",
         dest_provider=dest.name,
-        dest_cwd=normalize_dest_cwd(dest_cwd) or dest_cwd,
+        dest_cwd=resolve_dest_cwd(dest_cwd),
     )
 
 

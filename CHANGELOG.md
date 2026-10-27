@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Copying a Hermes session to another agent fails cleanly (and exits non-zero) when the Hermes export fails, instead of writing a stub session; a relative `--to` resolves against the current directory, an empty one is an error, and a custom title is carried over from Claude Code transcripts
 - `axism move` refuses sessions (and projects containing sessions) that are running, as the TUI does; `--force` overrides
 - `--config-dir` works when the saved active backend is unknown or disabled (it falls back to Claude Code like a plain run), and a settings file that is not valid UTF-8 or has a non-boolean `enabled` no longer breaks startup
 - Cursor and Hermes: session ids that are not plain ids (`.`, `..`, empty, containing `/`) match nothing and are refused even with `--force`; only paths strictly inside the session stores are removed, and a symlinked session file or store is unlinked without touching what it points to
