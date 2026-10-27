@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from pathlib import Path
 
 import pytest
-from conftest import DEMO_SLUG, SESSION_A, SESSION_B, build_fake_config
+from conftest import DEMO_SLUG, SESSION_A, SESSION_B, build_fake_config, write_jsonl
 from textual.widgets import DataTable, Input
 
 import axism.tui.app as tui
@@ -317,5 +318,44 @@ def test_left_right_still_switch_panes_without_input(tmp_path, monkeypatch):
             await pilot.press("left")
             await pilot.pause()
             assert app._focus_pane() == "projects"
+
+    _run(main())
+
+
+@pytest.mark.parametrize("size", [(80, 24), (100, 30)])
+def test_scrolling_lists_fit_without_clipping(tmp_path, monkeypatch, size):
+    claude = _setup(tmp_path, monkeypatch, fake=False)
+    for pi in range(40):
+        cwd = f"/home/alice/src/proj{pi:02d}"
+        slug = cwd.replace("/", "-")
+        for i in range(60 if pi == 39 else 1):
+            sid = str(uuid.UUID(int=pi * 1000 + i + 1))
+            write_jsonl(
+                claude / "projects" / slug / f"{sid}.jsonl",
+                [
+                    {"type": "custom-title", "customTitle": f"t{pi}-{i}", "sessionId": sid},
+                    {
+                        "type": "user",
+                        "sessionId": sid,
+                        "cwd": cwd,
+                        "isSidechain": False,
+                        "message": {"role": "user", "content": "hello"},
+                        "uuid": str(uuid.uuid4()),
+                        "timestamp": "2026-01-01T00:00:00.000Z",
+                    },
+                ],
+            )
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=size) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            for tid in ("#projects", "#sessions"):
+                table = app.query_one(tid, DataTable)
+                assert table.row_count > table.size.height
+                assert table.show_vertical_scrollbar
+                region = table.scrollable_content_region
+                assert table.virtual_size.width <= region.width, (tid, size)
 
     _run(main())

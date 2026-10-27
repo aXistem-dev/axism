@@ -55,7 +55,7 @@ def test_agent_glyph():
 
 
 def test_column_plans_budget_includes_cell_padding():
-    for budget in (18, 38, 78):
+    for budget in range(10, 201):
         for multi in (False, True):
             p = plan_projects_layout(budget, multi_agent=multi)
             widths = p.column_widths()
@@ -63,3 +63,32 @@ def test_column_plans_budget_includes_cell_padding():
         s = plan_sessions_layout(budget)
         widths = s.column_widths()
         assert sum(widths) + 2 * len(widths) <= budget, (budget, s)
+
+
+def test_primary_column_never_shrinks_as_budget_grows():
+    for multi in (False, True):
+        prev = 0
+        for budget in range(10, 201):
+            w = plan_projects_layout(budget, multi_agent=multi).project_width
+            assert w >= prev, (budget, multi, w, prev)
+            prev = w
+    prev = 0
+    for budget in range(10, 201):
+        w = plan_sessions_layout(budget).title_width
+        assert w >= prev, (budget, w, prev)
+        prev = w
+
+
+def test_optional_columns_need_a_roomy_primary_column():
+    for budget in range(10, 201):
+        p = plan_projects_layout(budget, multi_agent=False)
+        if p.show_count:
+            assert p.project_width >= 12
+        s = plan_sessions_layout(budget)
+        if s.show_updated:
+            assert s.title_width >= 20
+    # compact date comes before the full date plus Size
+    mid = [plan_sessions_layout(b) for b in range(10, 80)]
+    first_full = next(i for i, x in enumerate(mid) if x.show_updated and x.updated_width == 11)
+    first_compact = next(i for i, x in enumerate(mid) if x.show_updated)
+    assert first_compact < first_full

@@ -200,17 +200,26 @@ CELL_PADDING = 2
 NARROW_COLUMNS = 70
 
 
+# The primary column (project name / session title) keeps at least this many
+# cells before an optional column is added. Layouts that could still grow an
+# optional column cap the primary column at this size, so it never gets
+# narrower as the budget grows.
+MIN_PROJECT_NAME = 12
+MIN_SESSION_TITLE = 20
+
+
 def plan_projects_layout(budget: int, *, multi_agent: bool) -> ProjectsLayout:
     """Choose projects columns that fit in ``budget`` cells (no h-scroll).
 
     The budget covers content widths plus ``CELL_PADDING`` per visible column.
     """
+    cap = MIN_PROJECT_NAME
 
     def flex(fixed: list[int], n_cols: int) -> int:
         return budget - sum(fixed) - CELL_PADDING * n_cols
 
-    # Sel + Agent + Project + # + Size
-    if multi_agent and flex([1, 6, 3, 5], 5) >= 8:
+    # Sel + Agent + Project + # + Size  (final layout: name takes the rest)
+    if multi_agent and flex([1, 6, 3, 5], 5) >= cap:
         return ProjectsLayout(
             density="full",
             show_agent_col=True,
@@ -220,19 +229,8 @@ def plan_projects_layout(budget: int, *, multi_agent: bool) -> ProjectsLayout:
             project_width=flex([1, 6, 3, 5], 5),
             agent_width=6,
         )
-    # Sel + Agent + Project + #
-    if multi_agent and flex([1, 6, 3], 4) >= 8:
-        return ProjectsLayout(
-            density="cozy",
-            show_agent_col=True,
-            show_count=True,
-            show_size=False,
-            agent_in_project=False,
-            project_width=flex([1, 6, 3], 4),
-            agent_width=6,
-        )
-    # Sel + Project + # + Size
-    if not multi_agent and flex([1, 3, 5], 4) >= 8:
+    # Sel + Project + # + Size  (final layout without an agent column)
+    if not multi_agent and flex([1, 3, 5], 4) >= cap:
         return ProjectsLayout(
             density="full",
             show_agent_col=False,
@@ -241,15 +239,26 @@ def plan_projects_layout(budget: int, *, multi_agent: bool) -> ProjectsLayout:
             agent_in_project=False,
             project_width=flex([1, 3, 5], 4),
         )
+    # Sel + Agent + Project + #
+    if multi_agent and flex([1, 6, 3], 4) >= cap:
+        return ProjectsLayout(
+            density="cozy",
+            show_agent_col=True,
+            show_count=True,
+            show_size=False,
+            agent_in_project=False,
+            project_width=cap,
+            agent_width=6,
+        )
     # Sel + Project (with an "H " agent prefix when federated) + #
-    if flex([1, 3], 3) >= 6:
+    if flex([1, 3], 3) >= cap:
         return ProjectsLayout(
             density="cozy",
             show_agent_col=False,
             show_count=True,
             show_size=False,
             agent_in_project=multi_agent,
-            project_width=flex([1, 3], 3),
+            project_width=cap,
         )
     # Ultra-tight: mark + project only (agent glyph inlined when federated).
     return ProjectsLayout(
@@ -258,7 +267,7 @@ def plan_projects_layout(budget: int, *, multi_agent: bool) -> ProjectsLayout:
         show_count=False,
         show_size=False,
         agent_in_project=multi_agent,
-        project_width=max(4, flex([1], 2)),
+        project_width=min(cap, max(4, flex([1], 2))),
     )
 
 
@@ -267,12 +276,13 @@ def plan_sessions_layout(budget: int) -> SessionsLayout:
 
     The budget covers content widths plus ``CELL_PADDING`` per visible column.
     """
+    cap = MIN_SESSION_TITLE
 
     def flex(fixed: list[int], n_cols: int) -> int:
         return budget - sum(fixed) - CELL_PADDING * n_cols
 
-    # Sel + Title + Updated + Size + Tags
-    if flex([1, 11, 5, 10], 5) >= 10:
+    # Sel + Title + Updated + Size + Tags  (final layout)
+    if flex([1, 11, 5, 10], 5) >= cap:
         return SessionsLayout(
             density="full",
             show_updated=True,
@@ -283,23 +293,23 @@ def plan_sessions_layout(budget: int) -> SessionsLayout:
             tags_width=10,
         )
     # Sel + Title + Updated + Size
-    if flex([1, 11, 5], 4) >= 10:
+    if flex([1, 11, 5], 4) >= cap:
         return SessionsLayout(
             density="cozy",
             show_updated=True,
             show_size=True,
             show_tags=False,
-            title_width=flex([1, 11, 5], 4),
+            title_width=cap,
             updated_width=11,
         )
-    # Compact date (MM-DD only)
-    if flex([1, 5], 3) >= 8:
+    # Compact date (MM-DD only), before the full date and Size are added
+    if flex([1, 5], 3) >= cap:
         return SessionsLayout(
             density="cozy",
             show_updated=True,
             show_size=False,
             show_tags=False,
-            title_width=flex([1, 5], 3),
+            title_width=cap,
             updated_width=5,
         )
     return SessionsLayout(
@@ -307,7 +317,7 @@ def plan_sessions_layout(budget: int) -> SessionsLayout:
         show_updated=False,
         show_size=False,
         show_tags=False,
-        title_width=max(6, flex([1], 2)),
+        title_width=min(cap, max(5, flex([1], 2))),
     )
 
 
@@ -1590,15 +1600,26 @@ class SessionManagerApp(App[None]):
         found = provider_by_name(self.providers, session.provider)
         return found or self.provider
 
+    @staticmethod
+    def _table_budget(table: DataTable, default: int) -> int:
+        """Cells available to columns: the table width minus the scrollbar gutter.
+
+        The gutter is always reserved so the plan does not flip when rows start
+        to scroll.
+        """
+        if not table.size.width:
+            return default
+        return table.size.width - table.styles.scrollbar_size_vertical
+
     def _compute_projects_layout(self) -> ProjectsLayout:
         table = self.query_one("#projects", DataTable)
         return plan_projects_layout(
-            table.size.width or 24, multi_agent=self._multi_agent()
+            self._table_budget(table, 24), multi_agent=self._multi_agent()
         )
 
     def _compute_sessions_layout(self) -> SessionsLayout:
         table = self.query_one("#sessions", DataTable)
-        return plan_sessions_layout(table.size.width or 40)
+        return plan_sessions_layout(self._table_budget(table, 40))
 
     def _setup_projects_columns(self, layout: ProjectsLayout | None = None) -> None:
         table = self.query_one("#projects", DataTable)
