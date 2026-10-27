@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A live-session record is trusted only while its process start time still matches, so a reused process id is never listed as live or signalled; duplicate records for one session prefer a running one, then the newest
+- If a live session cannot be stopped, its delete aborts with `aborted: could not stop live session` and nothing of it is removed, with or without `--force`
 - A session is identified by its transcript file name, so a transcript that mentions another session id is listed and deleted under its own id
 - A title set with rename always wins over a generated title
 - Renaming a session whose transcript ends mid-line starts a fresh line, so the new title is read back

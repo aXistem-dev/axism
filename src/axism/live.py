@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ class LiveSession:
     bridge_session_id: str | None = None
     daemon_short: str | None = None
     source: str = "filesystem"  # filesystem | claude_cli
+    proc_start: str | None = None  # registry ``procStart`` (process start ticks)
 
     @property
     def is_live(self) -> bool:
@@ -36,11 +38,11 @@ class LiveSession:
         if self.state in {"exited", "done", "failed"}:
             return False
         if self.kind == "interactive":
-            return self.pid is not None and _pid_alive(self.pid)
+            return self.pid is not None and _live_pid(self.pid, self.proc_start)
         # background: active job states only (do not require a local pid)
         if self.state in {"working", "blocked", "running"}:
             return True
-        if self.pid is not None and _pid_alive(self.pid):
+        if self.pid is not None and _live_pid(self.pid, self.proc_start):
             return True
         return False
 
@@ -51,13 +53,40 @@ class LiveSession:
 
 def _pid_alive(pid: int) -> bool:
     try:
-        os_kill = __import__("os").kill
-        os_kill(pid, 0)
+        os.kill(pid, 0)
         return True
     except OSError:
         return False
     except Exception:
         return False
+
+
+def _read_proc_start(pid: int) -> str | None:
+    """Process start time (clock ticks since boot) from ``/proc/<pid>/stat``.
+
+    ``None`` when unreadable (non-Linux, permissions, process gone).
+    """
+    try:
+        raw = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    # The command name (field 2) may contain spaces/parens; split after the last ')'.
+    rest = raw.rsplit(")", 1)[-1].split()
+    # rest[0] is field 3 (state), so field 22 is rest[19].
+    return rest[19] if len(rest) > 19 else None
+
+
+def _identity_ok(pid: int, proc_start: str | None) -> bool:
+    """False only when we can prove the pid now belongs to another process."""
+    if not proc_start:
+        return True
+    current = _read_proc_start(pid)
+    return current is None or current == str(proc_start)
+
+
+def _live_pid(pid: int, proc_start: str | None = None) -> bool:
+    """The pid exists and (when verifiable) is still the recorded process."""
+    return _pid_alive(pid) and _identity_ok(pid, proc_start)
 
 
 def load_filesystem_live(root: Path | None = None) -> dict[str, LiveSession]:
@@ -67,6 +96,7 @@ def load_filesystem_live(root: Path | None = None) -> dict[str, LiveSession]:
     sdir = root / "sessions"
     if not sdir.is_dir():
         return out
+    rank: dict[str, tuple[int, int]] = {}
     for entry in sdir.iterdir():
         if not entry.name.endswith(".json"):
             continue
@@ -80,17 +110,28 @@ def load_filesystem_live(root: Path | None = None) -> dict[str, LiveSession]:
         if not isinstance(sid, str):
             continue
         pid = data.get("pid")
-        alive = isinstance(pid, int) and _pid_alive(pid)
+        pid = pid if isinstance(pid, int) and not isinstance(pid, bool) else None
+        proc_start = data.get("procStart")
+        proc_start = str(proc_start) if proc_start not in (None, "") else None
+        alive = pid is not None and _live_pid(pid, proc_start)
+        if pid is not None and not alive and _pid_alive(pid):
+            pid = None  # recycled pid: never treat (or signal) it as this session
         status = data.get("status") if alive else "exited"
+        updated = data.get("updatedAt")
+        key = (1 if alive else 0, updated if isinstance(updated, int) else 0)
+        if sid in rank and key <= rank[sid]:
+            continue
+        rank[sid] = key
         out[sid] = LiveSession(
             session_id=sid,
             kind=data.get("kind") or "interactive",
             name=data.get("name"),
             cwd=data.get("cwd"),
             state=status,
-            pid=pid if isinstance(pid, int) else None,
+            pid=pid,
             bridge_session_id=data.get("bridgeSessionId"),
             source="filesystem",
+            proc_start=proc_start,
         )
     return out
 
@@ -310,13 +351,20 @@ def clear_local_job(session_id: str, *, root: Path | None = None) -> tuple[bool,
     return bool(messages), "\n".join(messages) or "nothing cleared"
 
 
-def _signal_pid(pid: int, *, force: bool = False) -> tuple[bool, str]:
-    """Send SIGTERM (or SIGKILL if force) to a process."""
-    import os
+def _signal_pid(
+    pid: int, *, force: bool = False, proc_start: str | None = None
+) -> tuple[bool, str]:
+    """Send SIGTERM (or SIGKILL if force) to a process.
+
+    When ``proc_start`` is given, the pid must still be that process.
+    """
     import signal
     import time
 
-    if not _pid_alive(pid):
+    def alive() -> bool:
+        return _live_pid(pid, proc_start)
+
+    if not alive():
         return True, f"pid {pid} already exited"
     try:
         os.kill(pid, signal.SIGKILL if force else signal.SIGTERM)
@@ -324,7 +372,7 @@ def _signal_pid(pid: int, *, force: bool = False) -> tuple[bool, str]:
         return False, f"kill({pid}) failed: {exc}"
     # Brief wait for graceful exit
     for _ in range(20):
-        if not _pid_alive(pid):
+        if not alive():
             return True, f"signaled pid {pid} ({'KILL' if force else 'TERM'})"
         time.sleep(0.05)
     if not force:
@@ -333,7 +381,7 @@ def _signal_pid(pid: int, *, force: bool = False) -> tuple[bool, str]:
         except OSError as exc:
             return False, f"SIGKILL {pid} failed: {exc}"
         time.sleep(0.1)
-        if not _pid_alive(pid):
+        if not alive():
             return True, f"signaled pid {pid} (TERM then KILL)"
         return False, f"pid {pid} still alive after KILL"
     return False, f"pid {pid} still alive"
@@ -375,8 +423,9 @@ def kill_live_session(
             messages.append(msg2)
             ok = ok or ok2
 
-    if live.pid is not None and _pid_alive(live.pid):
-        ok_pid, msg_pid = _signal_pid(live.pid, force=False)
+    if live.pid is not None and _live_pid(live.pid, live.proc_start):
+        sig_kwargs = {"proc_start": live.proc_start} if live.proc_start else {}
+        ok_pid, msg_pid = _signal_pid(live.pid, force=False, **sig_kwargs)
         messages.append(msg_pid)
         ok = ok or ok_pid
 
@@ -384,7 +433,7 @@ def kill_live_session(
         not ok
         and clear_local_on_fail
         and live.kind == "background"
-        and (live.pid is None or not _pid_alive(live.pid))
+        and (live.pid is None or not _live_pid(live.pid, live.proc_start))
     ):
         cleared, cmsg = clear_local_job(session_id, root=root)
         messages.append(cmsg)
@@ -401,7 +450,7 @@ def kill_live_session(
 
     # Best-effort: remove stale live registry files for this session
     sdir = root / "sessions"
-    if sdir.is_dir() and live.pid is not None and not _pid_alive(live.pid):
+    if sdir.is_dir() and live.pid is not None and not _live_pid(live.pid, live.proc_start):
         for entry in list(sdir.glob(f"{live.pid}.*")) + (
             [sdir / f"{live.pid}.json"] if (sdir / f"{live.pid}.json").exists() else []
         ):
