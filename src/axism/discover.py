@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from axism.ids import match_session_id
 from axism.paths import (
     config_root,
     decode_project_slug,
@@ -229,12 +230,11 @@ def discover_all(root: Path | None = None) -> list[ProjectInfo]:
 def find_session(
     session_id: str, root: Path | None = None
 ) -> tuple[ProjectInfo, SessionMeta] | None:
-    sid = session_id.lower()
-    for proj in discover_all(root):
-        for sess in proj.sessions:
-            if sess.session_id.lower() == sid or sess.session_id.lower().startswith(sid):
-                return proj, sess
-    return None
+    found = [(proj, sess) for proj in discover_all(root) for sess in proj.sessions]
+    sid = match_session_id([s.session_id for _, s in found], session_id)
+    if sid is None:
+        return None
+    return next((p, s) for p, s in found if s.session_id == sid)
 
 
 def filter_projects_by_cwd(

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from axism import version_string
 from axism.discover import filter_projects_by_cwd
+from axism.ids import AmbiguousSessionId
 from axism.providers import (
     PROVIDER_LABELS,
     SessionProvider,
@@ -718,6 +719,13 @@ def main(argv: list[str] | None = None) -> None:
         rc = args.func(args)
     except UnsupportedOperation as exc:
         print(f"axism: {exc}", file=sys.stderr)
+        raise SystemExit(2) from None
+    except AmbiguousSessionId as exc:
+        print(f"axism: {exc}:", file=sys.stderr)
+        for sid in exc.matches[:10]:
+            print(f"  {sid}", file=sys.stderr)
+        if len(exc.matches) > 10:
+            print("  …", file=sys.stderr)
         raise SystemExit(2) from None
     raise SystemExit(rc)
 

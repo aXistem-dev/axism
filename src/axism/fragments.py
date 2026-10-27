@@ -26,6 +26,7 @@ PROTECTED_NAMES = frozenset(
         "control.key",
         "credentials.json",
         "mcp-auth.json",
+        "mcps",
         "memory",
         "model-catalog",
         "plugins",

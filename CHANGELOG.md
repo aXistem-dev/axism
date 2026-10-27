@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A session id prefix that matches several sessions is refused with the list of matching ids (exit code 2) instead of acting on the first match, so `delete`, `rename` and similar commands never touch the wrong session
 - README links (License, CI workflow, AGENTS.md, CHANGELOG.md) now use absolute GitHub URLs so they resolve correctly from the PyPI project page instead of only working on GitHub
 
 ## [0.1.1] — 2026-09-23

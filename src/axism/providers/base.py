@@ -15,6 +15,7 @@ from typing import Protocol, runtime_checkable
 from axism.delete import DeletePlan, ProjectDeletePlan
 from axism.discover import ProjectInfo, SessionMeta
 from axism.fragments import FragmentInventory
+from axism.ids import match_session_id
 from axism.live import LiveSession
 from axism.move import MoveResult
 
@@ -192,14 +193,12 @@ class ProviderBase:
     def find_session(
         self, session_id: str, root: Path | None = None
     ) -> tuple[ProjectInfo, SessionMeta] | None:
-        """Match on exact id first, then unique-ish prefix."""
-        needle = session_id.lower()
-        for proj in self.discover(root):
-            for sess in proj.sessions:
-                sid = sess.session_id.lower()
-                if sid == needle or sid.startswith(needle):
-                    return proj, sess
-        return None
+        """Match on exact id first, then a unique prefix; ambiguity raises."""
+        found = [(proj, sess) for proj in self.discover(root) for sess in proj.sessions]
+        sid = match_session_id([s.session_id for _, s in found], session_id)
+        if sid is None:
+            return None
+        return next((p, s) for p, s in found if s.session_id == sid)
 
     def merge_live(
         self, root: Path | None = None, *, use_cli: bool = True
