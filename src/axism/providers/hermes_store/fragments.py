@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from axism.fragments import Fragment, FragmentInventory
+from axism.fragments import Fragment, FragmentInventory, is_safe_id
 from axism.paths import path_size
 from axism.providers.hermes_store.discover import connect
 from axism.providers.hermes_store.paths import legacy_session_files, state_db
@@ -46,13 +46,16 @@ def collect_fragments(
                 size_bytes=_message_bytes(db, session_id),
             )
         )
+    if not is_safe_id(session_id):
+        return inv
     for path in legacy_session_files(root, session_id):
-        if path.is_file():
+        # Keep the final component unresolved: a symlink is removed as the link.
+        if path.is_symlink() or path.is_file():
             inv.fragments.append(
                 Fragment(
                     kind="legacy_json",
-                    path=path.resolve(),
-                    size_bytes=path_size(path),
+                    path=path.parent.resolve() / path.name,
+                    size_bytes=0 if path.is_symlink() else path_size(path),
                     optional=True,
                 )
             )

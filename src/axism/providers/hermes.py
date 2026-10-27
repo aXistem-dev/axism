@@ -8,7 +8,7 @@ from pathlib import Path
 
 from axism.delete import DeletePlan, ProjectDeletePlan
 from axism.discover import ProjectInfo, SessionMeta
-from axism.fragments import FragmentInventory
+from axism.fragments import FragmentInventory, is_safe_id
 from axism.live import LiveSession
 from axism.move import MoveResult
 from axism.providers.base import Capabilities, ProviderBase
@@ -16,6 +16,7 @@ from axism.providers.common import (
     exec_with_cwd,
     find_agent_sessions,
     remove_path,
+    strictly_inside,
     terminate_pid,
 )
 from axism.providers.hermes_store import discover as hermes_discover
@@ -167,6 +168,15 @@ class HermesProvider(ProviderBase):
     ) -> DeletePlan:
         root = self.config_root()
         full_id = session_id
+        if not is_safe_id(session_id):
+            return DeletePlan(
+                session_id=session_id,
+                inventory=FragmentInventory(
+                    session_id=session_id, project_slug=project_slug
+                ),
+                blocked_reason="session not found",
+                hard_blocked=True,
+            )
         if not hermes_discover.session_exists(root, session_id):
             found = self.find_session(session_id)
             if not found:
@@ -235,7 +245,11 @@ class HermesProvider(ProviderBase):
                 actions.append(f"{plan.session_id}: {msg}")
                 if not ok and not force:
                     continue
+            legacy_roots = [root / "sessions", root / "webui" / "sessions"]
             for frag in plan.inventory.deletable:
+                if not strictly_inside(frag.path, legacy_roots):
+                    actions.append(f"refused: {frag.path} outside the session stores")
+                    continue
                 if dry_run:
                     actions.append(f"would remove [{frag.kind}] {frag.path}")
                     continue

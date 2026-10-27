@@ -362,3 +362,60 @@ def test_workspace_delete_keeps_going_never_when_stop_fails(
     assert "aborted: project kept because a live session could not be stopped" in actions
     assert calls == []
     assert provider.plan_project_delete("/nowhere", force=True).hard_blocked
+
+
+@pytest.mark.parametrize("bad", [".", "..", "", "../x", "a/b"])
+def test_non_plain_session_ids_match_nothing(
+    hermes_env: tuple[Path, str], bad: str, monkeypatch: pytest.MonkeyPatch
+):
+    root, _ = hermes_env
+    calls: list = []
+    monkeypatch.setattr(
+        hermes_ops, "run_hermes", lambda *a, **k: calls.append(a) or (0, "x")
+    )
+    provider = HermesProvider()
+    plan = provider.plan_delete(bad, force=True)
+    assert plan.hard_blocked and plan.blocked_reason == "session not found"
+    assert provider.execute_deletes([plan], dry_run=False, force=True)[0].startswith(
+        "aborted"
+    )
+    assert provider.rename(bad, "x")[0] is False
+    assert calls == []
+    assert state_db(root).is_file()
+
+
+def test_symlinked_legacy_file_is_unlinked_not_followed(
+    hermes_env: tuple[Path, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root, _ = hermes_env
+    monkeypatch.setattr(hermes_ops, "run_hermes", lambda *_a, **_k: (0, "deleted"))
+    victim = tmp_path / "victim.json"
+    victim.write_text("{}", encoding="utf-8")
+    (root / "sessions").mkdir()
+    link = root / "sessions" / f"session_{CLI_SESSION}.json"
+    link.symlink_to(victim)
+    provider = HermesProvider()
+    plan = provider.plan_delete(CLI_SESSION)
+    provider.execute_deletes([plan], dry_run=False)
+    assert victim.exists()
+    assert not link.is_symlink()
+
+
+def test_hermes_fragments_outside_the_legacy_dirs_are_refused(
+    hermes_env: tuple[Path, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from axism.delete import DeletePlan
+    from axism.fragments import Fragment, FragmentInventory
+
+    root, _ = hermes_env
+    monkeypatch.setattr(hermes_ops, "run_hermes", lambda *_a, **_k: (0, "deleted"))
+    outside = tmp_path / "outside.json"
+    outside.write_text("{}", encoding="utf-8")
+    inv = FragmentInventory(session_id=CLI_SESSION, project_slug=None)
+    inv.fragments.append(Fragment(kind="legacy_json", path=outside, size_bytes=1))
+    inv.fragments.append(Fragment(kind="legacy_json", path=root / "sessions", size_bytes=1))
+    (root / "sessions").mkdir()
+    plan = DeletePlan(session_id=CLI_SESSION, inventory=inv)
+    actions = HermesProvider().execute_deletes([plan], dry_run=False, force=True)
+    assert sum(a.startswith("refused: ") for a in actions) == 2
+    assert outside.exists() and (root / "sessions").is_dir()

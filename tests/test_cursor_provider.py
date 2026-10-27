@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from axism.delete import ProjectDeletePlan
+from axism.delete import DeletePlan, ProjectDeletePlan
 from axism.providers import get_provider
 from axism.providers.cursor import CursorProvider
 from axism.providers.cursor_store.discover import read_cli_meta
@@ -421,3 +421,54 @@ def test_unknown_session_is_never_forced_in_cursor(cursor_env: tuple[Path, str])
     assert provider.execute_deletes([plan], dry_run=False, force=True)[0].startswith(
         "aborted"
     )
+
+
+@pytest.mark.parametrize("bad", [".", "..", "", "../x", "a/b"])
+def test_non_plain_session_ids_match_nothing(
+    cursor_env: tuple[Path, str], bad: str, tmp_path: Path
+):
+    root, _ = cursor_env
+    before = sorted(str(p) for p in root.rglob("*"))
+    provider = CursorProvider()
+    plan = provider.plan_delete(bad, force=True)
+    assert plan.hard_blocked
+    assert plan.blocked_reason == "session not found"
+    assert not plan.inventory.deletable
+    actions = provider.execute_deletes([plan], dry_run=False, force=True)
+    assert actions[0].startswith("aborted")
+    assert provider.rename(bad, "x")[0] is False
+    assert sorted(str(p) for p in root.rglob("*")) == before
+
+
+def test_fragments_outside_the_stores_are_refused(
+    cursor_env: tuple[Path, str], tmp_path: Path
+):
+    from axism.fragments import Fragment, FragmentInventory
+
+    root, _ = cursor_env
+    for target in (root / "projects", root / "chats", tmp_path):
+        inv = FragmentInventory(session_id="x", project_slug=None)
+        inv.fragments.append(Fragment(kind="transcript_dir", path=target, size_bytes=0))
+        plan = DeletePlan(session_id="x", inventory=inv)
+        actions = CursorProvider().execute_deletes([plan], dry_run=False, force=True)
+        assert any(a.startswith("refused: ") for a in actions), actions
+    assert (root / "projects").is_dir() and (root / "chats").is_dir()
+
+
+def test_symlinked_agent_store_is_unlinked_not_followed(
+    cursor_env: tuple[Path, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    state = tmp_path / "state"
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "keep.txt").write_text("x", encoding="utf-8")
+    stores = state / "cursor" / "agent-stores" / "cursor_agent_stores"
+    stores.mkdir(parents=True)
+    (stores / AGENT_ONLY).symlink_to(victim)
+
+    provider = CursorProvider()
+    plan = provider.plan_delete(AGENT_ONLY)
+    provider.execute_deletes([plan], dry_run=False)
+    assert (victim / "keep.txt").exists()
+    assert not (stores / AGENT_ONLY).is_symlink()

@@ -8,6 +8,7 @@ import sqlite3
 from pathlib import Path
 
 from axism.discover import ProjectInfo, SessionMeta
+from axism.fragments import is_safe_id
 from axism.paths import path_size
 from axism.providers.cursor_store.paths import (
     NON_PROJECT_DIRS,
@@ -292,6 +293,8 @@ def discover_all(root: Path) -> list[ProjectInfo]:
 def locate_sessions(root: Path, session_id: str) -> list[Path]:
     """Every directory holding this chat — a chat can exist in both stores."""
     found: list[Path] = []
+    if not is_safe_id(session_id):
+        return found
     pdir = projects_dir(root)
     if pdir.is_dir():
         for child in pdir.iterdir():

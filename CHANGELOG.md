@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Cursor and Hermes: session ids that are not plain ids (`.`, `..`, empty, containing `/`) match nothing and are refused even with `--force`; only paths strictly inside the session stores are removed, and a symlinked session file or store is unlinked without touching what it points to
 - Hermes: commands run against the configured Hermes home are pinned to its default profile, so a sticky active profile can no longer redirect a rename, delete or resume to another profile; renaming to a title that starts with `-` works
 - Cursor and Hermes: if a live chat cannot be stopped, its delete aborts (with or without `--force`), a project delete keeps the project, and deleting a session or workspace that does not exist is refused even with `--force`
 - Hermes chats started through Hermes' launcher are detected as running, while a terminal multiplexer (tmux, screen, zellij) that merely carries the agent's command line is never mistaken for it or stopped

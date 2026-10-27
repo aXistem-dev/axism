@@ -7,7 +7,7 @@ from pathlib import Path
 
 from axism.delete import DeletePlan, ProjectDeletePlan
 from axism.discover import ProjectInfo, SessionMeta
-from axism.fragments import PROTECTED_NAMES, FragmentInventory
+from axism.fragments import PROTECTED_NAMES, FragmentInventory, is_safe_id
 from axism.live import LiveSession
 from axism.move import MoveResult
 from axism.paths import path_size
@@ -24,6 +24,7 @@ from axism.providers.cursor_store import live as cursor_live
 from axism.providers.cursor_store import ops as cursor_ops
 from axism.providers.cursor_store.paths import (
     NON_PROJECT_DIRS,
+    agent_stores_dir,
     chats_dir,
     cursor_data_dir,
     cwd_bucket,
@@ -151,6 +152,15 @@ class CursorProvider(ProviderBase):
     ) -> DeletePlan:
         root = self.config_root()
         full_id = session_id
+        if not is_safe_id(session_id):
+            return DeletePlan(
+                session_id=session_id,
+                inventory=FragmentInventory(
+                    session_id=session_id, project_slug=project_slug
+                ),
+                blocked_reason="session not found",
+                hard_blocked=True,
+            )
         if not cursor_discover.locate_sessions(root, session_id):
             found = self.find_session(session_id)
             if not found:
@@ -189,6 +199,11 @@ class CursorProvider(ProviderBase):
             force=force,
             stop_live=stop_live,
             stop_fn=self.stop,
+            roots=[
+                projects_dir(self.config_root()),
+                chats_dir(self.config_root()),
+                agent_stores_dir(),
+            ],
         )
 
     def plan_project_delete(

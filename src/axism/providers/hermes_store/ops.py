@@ -12,6 +12,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from axism.fragments import is_safe_id
+
 BINARY = "hermes"
 
 
@@ -52,6 +54,8 @@ def run_hermes(
 
 
 def rename_session(root: Path, session_id: str, title: str) -> tuple[bool, str]:
+    if not is_safe_id(session_id):
+        return False, f"session not found: {session_id}"
     clean = " ".join(title.split()).strip()
     if not clean:
         return False, "title must not be empty"
@@ -64,6 +68,8 @@ def rename_session(root: Path, session_id: str, title: str) -> tuple[bool, str]:
 
 
 def delete_session(root: Path, session_id: str) -> tuple[bool, str]:
+    if not is_safe_id(session_id):
+        return False, f"session not found: {session_id}"
     rc, out = run_hermes(root, ["sessions", "delete", session_id, "--yes"])
     if rc != 0:
         return False, out or f"hermes sessions delete failed for {session_id}"

@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 from axism.delete import DeletePlan
+from axism.delete import _strictly_inside as strictly_inside
 from axism.live import LiveSession
 
 
@@ -196,11 +197,13 @@ def execute_fragment_deletes(
     force: bool = False,
     stop_live: bool = True,
     stop_fn=None,
+    roots: list[Path] | None = None,
 ) -> list[str]:
     """Remove every deletable fragment path in ``plans``.
 
     ``stop_fn(session_id, live) -> (ok, message)`` is called first for live
-    sessions when ``stop_live`` is set.
+    sessions when ``stop_live`` is set. With ``roots``, a fragment that is not
+    strictly inside one of them is refused.
     """
     actions: list[str] = []
     if not plans:
@@ -224,6 +227,9 @@ def execute_fragment_deletes(
                     continue
 
         for frag in plan.inventory.deletable:
+            if roots is not None and not strictly_inside(frag.path, roots):
+                actions.append(f"refused: {frag.path} outside the session stores")
+                continue
             if dry_run:
                 actions.append(
                     f"would remove [{frag.kind}] {frag.path} ({frag.size_bytes} B)"
