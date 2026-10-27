@@ -21,7 +21,7 @@ from axism.providers import (
     live_for_session,
     provider_from_settings,
 )
-from axism.settings import load_settings
+from axism.settings import DEFAULT_PROVIDER, Settings, load_settings
 
 
 def _fmt_size(n: int) -> str:
@@ -33,6 +33,14 @@ def _fmt_size(n: int) -> str:
     return f"{x:.1f}TB"
 
 
+def _effective_provider_name(settings: Settings) -> str:
+    """Active provider id, falling back to Claude Code when unknown or disabled."""
+    name = settings.active_provider
+    if name not in PROVIDER_LABELS or not settings.provider_prefs(name).enabled:
+        return DEFAULT_PROVIDER
+    return name
+
+
 def _provider(args: argparse.Namespace) -> SessionProvider:
     """Active backend: ``--provider`` / settings, with ``--config-dir`` override."""
     name = getattr(args, "provider", None)
@@ -41,7 +49,7 @@ def _provider(args: argparse.Namespace) -> SessionProvider:
         return get_provider(name, config_dir=config_dir)
     settings = load_settings()
     if config_dir:
-        return get_provider(settings.active_provider, config_dir=config_dir)
+        return get_provider(_effective_provider_name(settings), config_dir=config_dir)
     return provider_from_settings(settings)
 
 
@@ -714,7 +722,9 @@ def main(argv: list[str] | None = None) -> None:
         resolved = str(Path(args.config_dir).expanduser().resolve())
         args.config_dir = resolved
         # Claude Code also reads its root from the environment (slug encoding).
-        name = getattr(args, "provider", None) or load_settings().active_provider
+        name = getattr(args, "provider", None) or _effective_provider_name(
+            load_settings()
+        )
         if name == "claude_code":
             os.environ["CLAUDE_CONFIG_DIR"] = resolved
     try:

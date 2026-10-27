@@ -27,6 +27,17 @@ def settings_path() -> Path:
     return settings_dir() / SETTINGS_FILENAME
 
 
+def _parse_enabled(value: object) -> bool:
+    """Real booleans pass through; ``"true"``/``"false"`` strings are read; else on."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text == "false":
+            return False
+    return True
+
+
 @dataclass
 class ProviderPrefs:
     """Per-provider preferences (extensible for future backends)."""
@@ -50,8 +61,7 @@ class ProviderPrefs:
             config_dir = str(Path(raw_dir.strip()).expanduser())
         else:
             config_dir = None
-        enabled = data.get("enabled", True)
-        return cls(enabled=bool(enabled), config_dir=config_dir)
+        return cls(enabled=_parse_enabled(data.get("enabled")), config_dir=config_dir)
 
 
 @dataclass
@@ -105,7 +115,7 @@ def load_settings(path: Path | None = None) -> Settings:
     target = path or settings_path()
     try:
         text = target.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return default_settings()
     try:
         data = json.loads(text)

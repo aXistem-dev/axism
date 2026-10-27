@@ -64,3 +64,29 @@ def test_disabled_falls_back_to_default(tmp_path: Path):
     # Still returns a Claude provider (fallback) rather than raising.
     p = provider_from_settings(s)
     assert p.name == "claude_code"
+
+
+def test_load_non_utf8_file_gives_defaults(tmp_path: Path):
+    bad = tmp_path / "settings.json"
+    bad.write_bytes(b"\xff\xfe\x00{")
+    assert load_settings(bad).active_provider == DEFAULT_PROVIDER
+
+
+def test_enabled_accepts_only_real_booleans():
+    from axism.settings import Settings
+
+    def enabled(value: object) -> bool:
+        s = Settings.from_dict(
+            {"providers": {"cursor": {"enabled": value}}}
+        )
+        return s.provider_prefs("cursor").enabled
+
+    assert enabled(False) is False
+    assert enabled(True) is True
+    assert enabled("false") is False
+    assert enabled("true") is True
+    assert enabled("False") is False
+    assert enabled(0) is True
+    assert enabled(None) is True
+    assert enabled([]) is True
+    assert enabled("nonsense") is True
