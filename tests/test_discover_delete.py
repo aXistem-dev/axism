@@ -124,3 +124,103 @@ def test_delete_empty_project(fake_root: Path):
     assert plan.session_plans == []
     execute_project_delete(plan, root=fake_root, dry_run=False, force=True)
     assert empty.exists() is False
+
+
+# --- delete safety (project target resolution, removal guard, ids, symlinks) ---
+
+
+def test_delete_project_dot_resolves_to_cwd_project(fake_root, tmp_path, monkeypatch):
+    from axism.paths import encode_project_slug
+
+    cwd = tmp_path / "work" / "demo"
+    cwd.mkdir(parents=True)
+    slug = encode_project_slug(str(cwd.resolve()))
+    (fake_root / "projects" / slug).mkdir()
+    monkeypatch.chdir(cwd)
+    plan = build_project_delete_plan(".", root=fake_root, use_cli=False)
+    assert plan.blocked_reason is None
+    assert plan.slug == slug
+    assert plan.project_path == fake_root / "projects" / slug
+
+
+import pytest
+
+
+@pytest.mark.parametrize("target", ["", "..", "/", "/home/alice/nowhere", "../projects"])
+def test_delete_project_bad_target_blocked_even_with_force(
+    fake_root, tmp_path, monkeypatch, target
+):
+    monkeypatch.chdir(tmp_path)
+    plan = build_project_delete_plan(target, root=fake_root, force=True, use_cli=False)
+    assert plan.blocked_reason and "not found" in plan.blocked_reason
+    assert plan.hard_blocked
+    assert plan.extra_paths == []
+    actions = execute_project_delete(
+        plan, root=fake_root, dry_run=False, force=True
+    )
+    assert actions and actions[0].startswith("aborted")
+    assert (fake_root / "projects" / DEMO_SLUG).is_dir()
+    assert (fake_root / "projects").is_dir()
+
+
+def test_removal_guard_refuses_roots(fake_root):
+    from axism.delete import ProjectDeletePlan
+
+    plan = ProjectDeletePlan(
+        slug="x",
+        project_path=fake_root / "projects",
+        extra_paths=[fake_root],
+    )
+    actions = execute_project_delete(plan, root=fake_root, dry_run=False)
+    assert any(a.startswith("refused: ") for a in actions)
+    assert (fake_root / "projects" / DEMO_SLUG).is_dir()
+    assert (fake_root / "settings.json").is_file()
+
+
+def test_removal_guard_refuses_fragment_outside_root(fake_root, tmp_path):
+    from axism.fragments import Fragment
+
+    outside = tmp_path.parent / "axism-outside-victim"
+    outside.mkdir(exist_ok=True)
+    plan = build_delete_plan(
+        SESSION_A, project_slug=DEMO_SLUG, root=fake_root, use_cli=False
+    )
+    plan.inventory.fragments = [Fragment("uploads", outside, 0)]
+    actions = execute_delete(plan, root=fake_root, dry_run=False)
+    assert any(a.startswith("refused: ") for a in actions)
+    assert outside.is_dir()
+    outside.rmdir()
+
+
+def test_delete_traversal_id_removes_nothing(fake_root):
+    plan = build_delete_plan(
+        "../projects", root=fake_root, force=True, use_cli=False
+    )
+    assert plan.hard_blocked
+    assert plan.inventory.deletable == []
+    actions = execute_deletes([plan], root=fake_root, dry_run=False, force=True)
+    assert actions[0].startswith("aborted")
+    assert (fake_root / "projects" / DEMO_SLUG).is_dir()
+    assert collect_fragments("../projects", root=fake_root).fragments == []
+
+
+def test_symlinked_fragment_unlinks_link_only(fake_root, tmp_path):
+    target = tmp_path.parent / "axism-link-target"
+    target.mkdir(exist_ok=True)
+    (target / "keep.txt").write_text("x")
+    link = fake_root / "file-history" / SESSION_A
+    link.parent.mkdir(exist_ok=True)
+    if link.exists() or link.is_symlink():
+        import shutil
+
+        shutil.rmtree(link) if not link.is_symlink() else link.unlink()
+    link.symlink_to(target, target_is_directory=True)
+    plan = build_delete_plan(
+        SESSION_A, project_slug=DEMO_SLUG, root=fake_root, use_cli=False
+    )
+    execute_delete(plan, root=fake_root, dry_run=False)
+    assert not link.is_symlink() and not link.exists()
+    assert (target / "keep.txt").is_file()
+    import shutil
+
+    shutil.rmtree(target)

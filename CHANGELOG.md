@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Deleting a project by `.` or a path resolves it to the matching project only; empty, `..`, `/` or unknown targets are reported as "project not found" and are never overridden by `--force`
+- Deletes only remove paths strictly inside the projects, config or scratch roots (anything else is reported as `refused:`), and session ids that are not plain ids match nothing
+- Symlinked session fragments are unlinked without touching what they point to
 - A session id prefix that matches several sessions is refused with the list of matching ids (exit code 2) instead of acting on the first match, so `delete`, `rename` and similar commands never touch the wrong session
 - README links (License, CI workflow, AGENTS.md, CHANGELOG.md) now use absolute GitHub URLs so they resolve correctly from the PyPI project page instead of only working on GitHub
 

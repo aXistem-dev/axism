@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -36,6 +39,19 @@ PROTECTED_NAMES = frozenset(
         "state.db",
     }
 )
+
+
+SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+
+
+def is_safe_id(value: str | None) -> bool:
+    """True for a plain id / slug usable as a single path component."""
+    return isinstance(value, str) and bool(SAFE_ID_RE.match(value))
+
+
+def _slug_ok(slug: str) -> bool:
+    # Project slugs start with '-' (encoded leading slash) and contain no separators.
+    return bool(re.match(r"^[A-Za-z0-9_.-]+$", slug)) and slug not in {".", ".."}
 
 
 @dataclass
@@ -76,12 +92,15 @@ def _add_if_exists(
     out: list[Fragment], kind: str, path: Path, *, optional: bool = False
 ) -> None:
     try:
-        if path.exists():
+        if os.path.lexists(path):
+            # Keep the final component unresolved so a symlink is removed as
+            # the link, never through to its target.
+            link = path.is_symlink()
             out.append(
                 Fragment(
                     kind=kind,
-                    path=path.resolve(),
-                    size_bytes=path_size(path),
+                    path=path.parent.resolve() / path.name,
+                    size_bytes=path.lstat().st_size if link else path_size(path),
                     optional=optional,
                 )
             )
@@ -96,11 +115,12 @@ def collect_fragments(
     root: Path | None = None,
 ) -> FragmentInventory:
     """Collect all known on-disk fragments for a session UUID."""
-    if not is_session_uuid(session_id):
-        # still allow short prefix lookup via caller; require full uuid here
-        pass
     root = root or config_root()
     inv = FragmentInventory(session_id=session_id, project_slug=project_slug)
+    if not is_safe_id(session_id) or (
+        project_slug is not None and not _slug_ok(project_slug)
+    ):
+        return inv
     frags = inv.fragments
     short = short_session_id(session_id)
     projects = root / "projects"
@@ -118,10 +138,8 @@ def collect_fragments(
             bridge = pdir / "bridge-pointer.json"
             if bridge.is_file():
                 try:
-                    import json
-
                     data = json.loads(bridge.read_text(encoding="utf-8"))
-                    if data.get("sessionId") == session_id:
+                    if isinstance(data, dict) and data.get("sessionId") == session_id:
                         _add_if_exists(frags, "bridge_pointer", bridge)
                 except (OSError, json.JSONDecodeError):
                     pass
@@ -135,14 +153,14 @@ def collect_fragments(
     # Live session registry files keyed by PID — match by sessionId content
     sessions_dir = root / "sessions"
     if sessions_dir.is_dir():
-        import json
-
         for entry in sessions_dir.iterdir():
             if not entry.name.endswith(".json"):
                 continue
             try:
                 data = json.loads(entry.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(data, dict):
                 continue
             if data.get("sessionId") == session_id:
                 _add_if_exists(frags, "live_registry", entry, optional=True)

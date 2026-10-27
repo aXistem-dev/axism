@@ -20,6 +20,8 @@ class DeletePlan:
     blocked_reason: str | None = None
     live: LiveSession | None = None
     actions: list[str] = field(default_factory=list)
+    # Not found / invalid target: never overridable by ``force``.
+    hard_blocked: bool = False
 
     @property
     def can_delete(self) -> bool:
@@ -58,6 +60,7 @@ def build_delete_plan(
             session_id=session_id,
             inventory=inv,
             blocked_reason="session id too short / invalid",
+            hard_blocked=True,
         )
 
     # Resolve full UUID if short prefix was given
@@ -72,6 +75,7 @@ def build_delete_plan(
                 session_id=session_id,
                 inventory=inv,
                 blocked_reason="session not found",
+                hard_blocked=True,
             )
         _proj, sess = found
         full_id = sess.session_id
@@ -128,6 +132,40 @@ def _rewrite_history(history_path: Path, session_id: str) -> int:
     return removed
 
 
+def _strictly_inside(path: Path, roots: list[Path]) -> bool:
+    """True when ``path`` lies below (never equal to) one of ``roots``.
+
+    The final component is not resolved, so a symlink counts as the link itself.
+    """
+    try:
+        parent = path.parent.resolve()
+    except (OSError, RuntimeError):
+        return False
+    if path.name in {"", ".", ".."}:
+        return False
+    target = parent / path.name
+    for root in roots:
+        try:
+            r = root.resolve()
+        except (OSError, RuntimeError):
+            continue
+        if target != r and r in target.parents:
+            return True
+    return False
+
+
+def _removal_roots(root: Path) -> list[Path]:
+    from axism.paths import tmp_claude_roots
+
+    return [root, *tmp_claude_roots()]
+
+
+def _guarded_remove(path: Path, roots: list[Path]) -> str:
+    if not _strictly_inside(path, roots):
+        return f"refused: {path} outside {', '.join(str(r) for r in roots[:1])}"
+    return _remove_path(path)
+
+
 def _remove_path(path: Path) -> str:
     if path.is_symlink() or path.is_file():
         path.unlink()
@@ -148,8 +186,9 @@ def _stop_live_if_needed(
 ) -> list[str]:
     """Stop background/CLI job and/or signal PID before deleting files.
 
-    Returns action lines. If stop fails and ``force`` is False, the last line
-    starts with ``aborted`` and the caller should not continue deleting.
+    Returns action lines. If the stop fails (with or without ``force``), the
+    last line starts with ``aborted: could not stop live session`` and the
+    caller must not delete anything of that session.
     """
     if not stop_live or not plan.live:
         return []
@@ -167,7 +206,7 @@ def _stop_live_if_needed(
 
     ok, msg = kill_live_session(plan.session_id, live, root=root, use_cli=True)
     lines = [f"stop/kill: {msg}"]
-    if not ok and not force:
+    if not ok:
         lines.append("aborted: could not stop live session")
     return lines
 
@@ -184,7 +223,7 @@ def execute_delete(
     root = root or config_root()
     actions: list[str] = []
 
-    if plan.blocked_reason and not force:
+    if plan.hard_blocked or (plan.blocked_reason and not force):
         actions.append(f"aborted: {plan.blocked_reason}")
         return actions
 
@@ -196,7 +235,11 @@ def execute_delete(
         plan.actions = actions
         return actions
 
+    roots = _removal_roots(root)
     for frag in plan.inventory.deletable:
+        if not _strictly_inside(frag.path, roots):
+            actions.append(f"refused: {frag.path} outside {root}")
+            continue
         if frag.kind == "history_lines":
             if dry_run:
                 actions.append(
@@ -239,29 +282,35 @@ def execute_deletes(
     if not plans:
         return ["nothing to delete"]
 
-    blocked = [p for p in plans if p.blocked_reason and not force]
-    if blocked and not force:
+    blocked = [
+        p for p in plans if p.hard_blocked or (p.blocked_reason and not force)
+    ]
+    if blocked:
         for p in blocked:
             actions.append(f"aborted {p.session_id}: {p.blocked_reason}")
         return actions
 
     history_ids: list[str] = []
     history_path: Path | None = None
+    roots = _removal_roots(root)
 
     for plan in plans:
         stop_lines = _stop_live_if_needed(
             plan, root=root, dry_run=dry_run, force=force, stop_live=stop_live
         )
         for line in stop_lines:
-            # Prefix multi-delete stop lines with short id for clarity
-            if line.startswith(("would ", "stop/kill")):
-                actions.append(f"{plan.session_id[:8]}: {line}")
+            if line.startswith("aborted"):
+                # Keep the ``aborted:`` prefix so callers can detect it.
+                actions.append(f"{line} ({plan.session_id[:8]})")
             else:
                 actions.append(f"{plan.session_id[:8]}: {line}")
         if any(a.startswith("aborted") for a in stop_lines):
             continue
 
         for frag in plan.inventory.deletable:
+            if not _strictly_inside(frag.path, roots):
+                actions.append(f"refused: {frag.path} outside {root}")
+                continue
             if frag.kind == "history_lines":
                 history_ids.append(plan.session_id)
                 history_path = frag.path
@@ -333,6 +382,8 @@ class ProjectDeletePlan:
     total_bytes: int = 0
     blocked_reason: str | None = None
     keep_memory: bool = False
+    # Not found / outside projects/: never overridable by ``force``.
+    hard_blocked: bool = False
 
     @property
     def can_delete(self) -> bool:
@@ -357,6 +408,35 @@ class ProjectDeletePlan:
         return lines
 
 
+def _resolve_project(value: str, pdir: Path, encode) -> tuple[str, Path] | None:
+    """Map a slug or a working-directory path to an existing project dir.
+
+    A value is a slug only when it is exactly the name of an existing child
+    directory of ``projects/``; anything else is treated as a path.
+    """
+    if value == "":
+        return None
+    if value not in {".", ".."} and "/" not in value and "\\" not in value and (pdir / value).is_dir():
+        return value, pdir / value
+    return _from_path(value, pdir, encode)
+
+
+def _from_path(value: str, pdir: Path, encode) -> tuple[str, Path] | None:
+    try:
+        resolved = Path(value).expanduser().resolve()
+    except (OSError, RuntimeError):
+        return None
+    try:
+        if resolved.is_dir() and resolved.parent == pdir.resolve():
+            return resolved.name, pdir / resolved.name
+    except OSError:
+        return None
+    slug = encode(str(resolved))
+    if slug and slug not in {".", ".."} and "/" not in slug and (pdir / slug).is_dir():
+        return slug, pdir / slug
+    return None
+
+
 def build_project_delete_plan(
     slug_or_path: str,
     *,
@@ -372,35 +452,33 @@ def build_project_delete_plan(
     root = root or config_root()
     pdir = projects_dir(root)
 
-    slug = slug_or_path
-    project_path = pdir / slug
-    if not project_path.is_dir():
-        # Treat as cwd
-        candidate = Path(slug_or_path).expanduser()
-        encoded = encode_project_slug(str(candidate))
-        if (pdir / encoded).is_dir():
-            slug = encoded
-            project_path = pdir / slug
-        elif candidate.is_dir() and candidate.parent.resolve() == pdir.resolve():
-            slug = candidate.name
-            project_path = candidate
-        else:
-            return ProjectDeletePlan(
-                slug=slug_or_path,
-                project_path=project_path,
-                blocked_reason=f"project not found: {slug_or_path}",
-                keep_memory=keep_memory,
-            )
+    not_found = ProjectDeletePlan(
+        slug=slug_or_path,
+        project_path=pdir / "(not found)",
+        blocked_reason=f"project not found: {slug_or_path}",
+        keep_memory=keep_memory,
+        hard_blocked=True,
+    )
+    resolved = _resolve_project(slug_or_path, pdir, encode_project_slug)
+    if resolved is None:
+        return not_found
+    slug, project_path = resolved
 
-    # Safety: only under projects/
+    # Safety: only a direct child of projects/
     try:
-        project_path.resolve().relative_to(pdir.resolve())
-    except ValueError:
+        inside = (
+            project_path.resolve() != pdir.resolve()
+            and project_path.resolve().parent == pdir.resolve()
+        )
+    except (OSError, RuntimeError):
+        inside = False
+    if not inside:
         return ProjectDeletePlan(
             slug=slug,
             project_path=project_path,
             blocked_reason="refusing to delete path outside projects/",
             keep_memory=keep_memory,
+            hard_blocked=True,
         )
 
     info = discover_project(project_path)
@@ -456,9 +534,13 @@ def execute_project_delete(
     root = root or config_root()
     actions: list[str] = []
 
-    if plan.blocked_reason and not force:
+    if plan.hard_blocked or (plan.blocked_reason and not force):
         actions.append(f"aborted: {plan.blocked_reason}")
         return actions
+
+    from axism.paths import projects_dir, tmp_claude_roots
+
+    proj_roots = [projects_dir(root)]
 
     # Delete per-session fragments first (outside the project dir where applicable)
     actions.extend(
@@ -470,6 +552,10 @@ def execute_project_delete(
             stop_live=stop_live,
         )
     )
+
+    if any(a.startswith("aborted: could not stop live session") for a in actions):
+        actions.append("aborted: project kept because a live session could not be stopped")
+        return actions
 
     memory_path = plan.project_path / "memory"
     if plan.keep_memory and memory_path.is_dir():
@@ -483,7 +569,7 @@ def execute_project_delete(
                 if child.name == "memory":
                     continue
                 try:
-                    actions.append(_remove_path(child))
+                    actions.append(_guarded_remove(child, proj_roots))
                 except OSError as exc:
                     actions.append(f"error removing {child}: {exc}")
     else:
@@ -493,7 +579,7 @@ def execute_project_delete(
             )
         else:
             try:
-                actions.append(_remove_path(plan.project_path))
+                actions.append(_guarded_remove(plan.project_path, proj_roots))
             except OSError as exc:
                 actions.append(f"error removing {plan.project_path}: {exc}")
 
@@ -502,7 +588,7 @@ def execute_project_delete(
             actions.append(f"would remove extra {extra}")
         else:
             try:
-                actions.append(_remove_path(extra))
+                actions.append(_guarded_remove(extra, tmp_claude_roots()))
             except OSError as exc:
                 actions.append(f"error removing {extra}: {exc}")
 
