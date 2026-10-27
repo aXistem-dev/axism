@@ -382,3 +382,42 @@ def test_sqlite_chat_under_a_hash_in_the_path_is_read(
     monkeypatch.setenv("CURSOR_DATA_DIR", str(root))
     sessions = [s for p in CursorProvider().discover() for s in p.sessions]
     assert [s.title for s in sessions] == ["Hash chat"]
+
+
+def test_failed_stop_aborts_cursor_delete_even_with_force(
+    cursor_env: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+):
+    from axism.live import LiveSession
+
+    root, _ = cursor_env
+    monkeypatch.setattr("axism.live._live_pid", lambda *_a, **_k: True)
+    provider = CursorProvider()
+    monkeypatch.setattr(provider, "stop", lambda sid, live=None: (False, "stuck"))
+    plan = provider.plan_delete(AGENT_ONLY, force=True)
+    plan.live = LiveSession(
+        session_id=AGENT_ONLY, kind="interactive", state="running", pid=4242,
+        source="filesystem",
+    )
+    actions = provider.execute_deletes([plan], dry_run=False, force=True)
+    assert f"aborted: could not stop live session ({AGENT_ONLY[:8]})" in actions
+    assert any(root.rglob(AGENT_ONLY))
+
+    project = provider.discover()[0]
+    pplan = provider.plan_project_delete(project.slug, force=True)
+    for sp in pplan.session_plans:
+        sp.live = LiveSession(
+            session_id=sp.session_id, kind="interactive", state="running", pid=4242,
+            source="filesystem",
+        )
+    actions = provider.execute_project_delete(pplan, dry_run=False, force=True)
+    assert "aborted: project kept because a live session could not be stopped" in actions
+    assert (root / "projects" / project.slug).is_dir()
+
+
+def test_unknown_session_is_never_forced_in_cursor(cursor_env: tuple[Path, str]):
+    provider = CursorProvider()
+    plan = provider.plan_delete("00000000-0000-0000-0000-000000000000", force=True)
+    assert plan.hard_blocked
+    assert provider.execute_deletes([plan], dry_run=False, force=True)[0].startswith(
+        "aborted"
+    )

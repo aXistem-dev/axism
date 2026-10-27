@@ -185,7 +185,7 @@ def test_rename_shells_out(hermes_env: tuple[Path, str], monkeypatch: pytest.Mon
 
     ok, msg = provider.rename(CLI_SESSION, "  New   title ")
     assert ok, msg
-    assert calls == [["sessions", "rename", CLI_SESSION, "New title"]]
+    assert calls == [["sessions", "rename", CLI_SESSION, "--", "New title"]]
     assert provider.rename(CLI_SESSION, "  ")[0] is False
 
 
@@ -249,3 +249,116 @@ def test_state_db_under_a_hash_in_the_path_is_read(
     monkeypatch.setenv("HERMES_HOME", str(root))
     ids = {s.session_id for p in HermesProvider().discover() for s in p.sessions}
     assert CLI_SESSION in ids
+
+
+def _capture_subprocess(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+    seen: list[dict] = []
+
+    class Done:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    def fake_run(argv, **kwargs):
+        seen.append({"argv": argv, "env": kwargs.get("env", {})})
+        return Done()
+
+    monkeypatch.setattr(hermes_ops.shutil, "which", lambda _b: "/usr/bin/hermes")
+    monkeypatch.setattr(hermes_ops.subprocess, "run", fake_run)
+    return seen
+
+
+def test_root_outside_profiles_is_pinned_with_dash_p_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    seen = _capture_subprocess(monkeypatch)
+    root = tmp_path / "hermes"
+    ok, _ = hermes_ops.rename_session(root, CLI_SESSION, "-dash title")
+    assert ok
+    assert seen[0]["argv"] == [
+        "hermes", "-p", "default", "sessions", "rename", CLI_SESSION, "--", "-dash title",
+    ]
+    assert seen[0]["env"]["HERMES_HOME"] == str(root)
+
+    hermes_ops.delete_session(root, CLI_SESSION)
+    assert seen[1]["argv"] == [
+        "hermes", "-p", "default", "sessions", "delete", CLI_SESSION, "--yes",
+    ]
+
+
+def test_profile_root_is_not_pinned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    seen = _capture_subprocess(monkeypatch)
+    root = tmp_path / "profiles" / "work"
+    hermes_ops.delete_session(root, CLI_SESSION)
+    assert seen[0]["argv"] == ["hermes", "sessions", "delete", CLI_SESSION, "--yes"]
+
+
+def test_resume_argv_pins_the_profile(tmp_path: Path):
+    assert hermes_ops.resume_argv(CLI_SESSION, tmp_path / "hermes") == [
+        "hermes", "-p", "default", "--resume", CLI_SESSION,
+    ]
+    assert hermes_ops.resume_argv(CLI_SESSION, tmp_path / "profiles" / "w") == [
+        "hermes", "--resume", CLI_SESSION,
+    ]
+
+
+def test_open_command_uses_the_config_root(hermes_env: tuple[Path, str], monkeypatch):
+    monkeypatch.setattr(hermes_ops.shutil, "which", lambda _b: "/usr/bin/hermes")
+    provider = HermesProvider()
+    session = provider.discover()[0].sessions[0]
+    argv, _ = provider.open_command(session)
+    assert argv[:3] == ["hermes", "-p", "default"]
+
+
+def _live(sid: str, pid: int = 4242):
+    from axism.live import LiveSession
+
+    return LiveSession(
+        session_id=sid, kind="interactive", state="running", pid=pid, source="filesystem"
+    )
+
+
+def test_failed_stop_aborts_the_delete_even_with_force(
+    hermes_env: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        hermes_ops, "run_hermes", lambda _r, a, **_k: calls.append(a) or (0, "deleted")
+    )
+    monkeypatch.setattr("axism.live._live_pid", lambda *_a, **_k: True)
+    provider = HermesProvider()
+    monkeypatch.setattr(provider, "stop", lambda sid, live=None: (False, "stuck"))
+    plan = provider.plan_delete(CLI_SESSION, force=True)
+    plan.live = _live(CLI_SESSION)
+    actions = provider.execute_deletes([plan], dry_run=False, force=True)
+    assert f"aborted: could not stop live session ({CLI_SESSION[:8]})" in actions
+    assert calls == []
+
+
+def test_unknown_session_is_never_forced(hermes_env: tuple[Path, str]):
+    provider = HermesProvider()
+    plan = provider.plan_delete("nope_nope", force=True)
+    assert plan.hard_blocked
+    actions = provider.execute_deletes([plan], dry_run=False, force=True)
+    assert actions[0].startswith("aborted")
+
+
+def test_workspace_delete_keeps_going_never_when_stop_fails(
+    hermes_env: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+):
+    _root, workspace = hermes_env
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        hermes_ops, "run_hermes", lambda _r, a, **_k: calls.append(a) or (0, "deleted")
+    )
+    monkeypatch.setattr("axism.live._live_pid", lambda *_a, **_k: True)
+    provider = HermesProvider()
+    monkeypatch.setattr(provider, "stop", lambda sid, live=None: (False, "stuck"))
+    plan = provider.plan_project_delete(workspace, force=True)
+    for sp in plan.session_plans:
+        sp.live = _live(sp.session_id)
+    actions = provider.execute_project_delete(plan, dry_run=False, force=True)
+    assert any(a.startswith("aborted: could not stop live session") for a in actions)
+    assert "aborted: project kept because a live session could not be stopped" in actions
+    assert calls == []
+    assert provider.plan_project_delete("/nowhere", force=True).hard_blocked

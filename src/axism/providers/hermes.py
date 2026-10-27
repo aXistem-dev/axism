@@ -95,7 +95,7 @@ class HermesProvider(ProviderBase):
     ) -> tuple[list[str], str | None]:
         if not shutil.which(hermes_ops.BINARY):
             raise FileNotFoundError(f"{hermes_ops.BINARY} not found on PATH")
-        return hermes_ops.resume_argv(session.session_id), session.cwd or None
+        return hermes_ops.resume_argv(session.session_id, self.config_root()), session.cwd or None
 
     def resume(self, session: SessionMeta, live: LiveSession | None = None) -> None:
         argv, workdir = self.open_command(session, live)
@@ -176,6 +176,7 @@ class HermesProvider(ProviderBase):
                         session_id=session_id, project_slug=project_slug
                     ),
                     blocked_reason="session not found",
+                    hard_blocked=True,
                 )
             _proj, sess = found
             full_id = sess.session_id
@@ -201,7 +202,7 @@ class HermesProvider(ProviderBase):
     ) -> list[str]:
         if not plans:
             return ["nothing to delete"]
-        blocked = [p for p in plans if p.blocked_reason and not force]
+        blocked = [p for p in plans if p.hard_blocked or (p.blocked_reason and not force)]
         if blocked:
             return [f"aborted {p.session_id}: {p.blocked_reason}" for p in blocked]
 
@@ -218,9 +219,10 @@ class HermesProvider(ProviderBase):
                 else:
                     ok, msg = self.stop(plan.session_id, live)
                     actions.append(f"{plan.session_id[:8]}: stop: {msg}")
-                    if not ok and not force:
+                    if not ok:
                         actions.append(
-                            f"{plan.session_id[:8]}: aborted: could not stop live session"
+                            "aborted: could not stop live session "
+                            f"({plan.session_id[:8]})"
                         )
                         continue
 
@@ -263,6 +265,7 @@ class HermesProvider(ProviderBase):
                 slug=slug_or_path,
                 project_path=state_db(root),
                 blocked_reason=f"workspace not found: {slug_or_path}",
+                hard_blocked=True,
             )
 
         plan = ProjectDeletePlan(
@@ -289,10 +292,15 @@ class HermesProvider(ProviderBase):
         force: bool = False,
         stop_live: bool = True,
     ) -> list[str]:
-        if plan.blocked_reason and not force:
+        if plan.hard_blocked or (plan.blocked_reason and not force):
             return [f"aborted: {plan.blocked_reason}"]
         if not plan.session_plans:
             return [f"workspace {plan.slug} has no sessions"]
-        return self.execute_deletes(
+        actions = self.execute_deletes(
             plan.session_plans, dry_run=dry_run, force=force, stop_live=stop_live
         )
+        if any(a.startswith("aborted: could not stop live session") for a in actions):
+            actions.append(
+                "aborted: project kept because a live session could not be stopped"
+            )
+        return actions
