@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Exit codes for `delete` and `delete-project`: without `--yes` or `--dry-run` they print the preview and exit 1; an explicit `--dry-run` exits 0; a blocked plan (not found, or a live session without `--force`) exits 2 in every mode; a `--yes` run that reports an aborted, refused or failed step exits 1
 - aXistem is named as author and copyright holder
 - Responsive projects/sessions tables: density modes (full/cozy/tight), flex pane ratios with minimum widths, the agent glyph inlined when narrow, and horizontal scrollbars disabled so small terminals stay keyboard-friendly
-- Narrow terminals (under 70 columns) hide the details pane so both lists stay visible, table columns count their cell padding so rows no longer scroll sideways, and the first screen uses the real terminal width
+- Narrow terminals (under 70 columns) hide the details pane so both lists stay visible, table columns count their cell padding so rows fit without sideways scrolling, and the first screen uses the real terminal width
 - A config directory chosen in Settings also applies to the Claude Code commands aXism runs (stop, purge, live listing, open/resume), so they act on the same sessions you see
 - The release workflow stops when the tag does not match `pyproject.toml` or `__version__`, and runs the tests, lint and anonymity check before building and publishing
 - README links (License, CI workflow, AGENTS.md, CHANGELOG.md) use absolute GitHub URLs so they resolve from the PyPI project page
@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A session that cannot be stopped is never deleted: its delete aborts with `aborted: could not stop live session` and nothing of it is removed, with or without `--force`. A project delete then keeps the project folder and reports how many other sessions were deleted
 - A session or project that does not exist is refused even with `--force`, in every backend; this includes a full session id with nothing left on disk, while leftover files of a missing session can still be cleaned up
-- Session ids that are not plain ids (`.`, `..`, empty, containing `/` or a line break) match nothing, and deleting a project by `.`, `..`, `/` or an unknown target reports "project not found"
+- Session ids that are not plain ids (`.`, `..`, empty, containing `/`) match nothing. In Claude Code, `delete-project` takes a slug or a path, so `.` and `..` mean the current and parent directory; a path that does not belong to a known project, the agent's own folders, and `/` are refused as "project not found", even with `--force`. A full session id is checked with a direct file lookup and compared as a canonical UUID (case-insensitive), so planning a delete stays fast in large homes
 - Deletes only remove paths strictly inside the backend's own roots (anything else is reported as `refused:`). Symlinked files, stores and project folders are never followed: a symlinked file or store is unlinked without touching its target, and a symlinked project folder is refused
 - A live-session record is trusted only while its process start time still matches, so a reused process id is never listed as live or signalled; duplicate records for one session prefer a running one, then the newest. Stopping a Cursor or Hermes chat re-checks the process right before signalling it
 - Deleting a Hermes session fails (and keeps its legacy files) when the `hermes` command fails, instead of reporting success
@@ -41,9 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The app reports a delete as failed when a session could not be stopped, was aborted, or a path was refused, instead of showing success
 - `a` in the sessions pane marks only the sessions shown by the current filter, so a filtered delete cannot remove hidden sessions
-- Deleting the last project clears the selected session and the detail pane, so `o` and `n` no longer act on a session that is gone
+- Deleting the last project clears the selected session and the detail pane, so `o` and `n` never act on a session that is gone
 - Left and Right move the text cursor while typing in the session filter instead of switching panes
-- Toggling `k` in the project delete dialog no longer re-queries running sessions
+- Toggling `k` in the project delete dialog does not re-query running sessions
 
 #### Backends
 
@@ -52,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cursor: moving a project whose workspace is unknown (a `chats-...` entry) moves its chats instead of failing
 - Cursor and Hermes databases are read correctly when the config path contains characters such as `#` or `?`
 - Copying a Hermes session to another agent fails cleanly (and exits non-zero) when the Hermes export fails, instead of writing a stub session; a relative `--to` resolves against the current directory, an empty one is an error, and a custom title is carried over from Claude Code transcripts
-- `--config-dir` works when the saved active backend is unknown or disabled (it falls back to Claude Code like a plain run), and a settings file that is not valid UTF-8 or has a non-boolean `enabled` no longer breaks startup
+- `--config-dir` works when the saved active backend is unknown or disabled (it falls back to Claude Code like a plain run), and a settings file that is not valid UTF-8 or has a non-boolean `enabled` starts normally
 
 #### Moving, renaming and discovery
 

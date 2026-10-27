@@ -58,7 +58,7 @@ def short_session_id(session_id: str) -> str:
 
 
 def is_session_uuid(name: str) -> bool:
-    return bool(UUID_RE.match(name))
+    return bool(UUID_RE.fullmatch(name))
 
 
 def tmp_claude_roots() -> list[Path]:

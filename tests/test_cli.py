@@ -153,3 +153,9 @@ def test_delete_project_accepts_a_dash_slug_after_double_dash(fake_root: Path):
     assert _run(["delete-project", "--dry-run", "--", "-home-alice-src-demo"]) == 0
     assert _run(["delete-project", "--yes", "--", "-home-alice-src-demo"]) == 0
     assert not (fake_root / "projects" / "-home-alice-src-demo").exists()
+
+
+def test_delete_malformed_or_uppercase_uuid_never_exits_zero_empty(fake_root: Path):
+    assert _run(["delete", "99999999-9999-9999-9999-99999999999f\n", "--dry-run"]) == 2
+    assert _run(["delete", "99999999-9999-9999-9999-99999999999F", "--dry-run"]) == 2
+    assert _run(["delete", SESSION_A.upper(), "--dry-run"]) == 0

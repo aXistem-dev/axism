@@ -46,6 +46,20 @@ class DeletePlan:
         return lines
 
 
+def _transcript_exists(session_id: str, project_slug: str | None, root: Path) -> bool:
+    """Cheap existence check: some ``projects/*/<uuid>.jsonl`` file exists."""
+    projects = root / "projects"
+    name = f"{session_id}.jsonl"
+    if project_slug is not None:
+        if not project_slug or "/" in project_slug or project_slug in (".", ".."):
+            return False
+        return (projects / project_slug / name).is_file()
+    try:
+        return any((d / name).is_file() for d in projects.iterdir() if d.is_dir())
+    except OSError:
+        return False
+
+
 def build_delete_plan(
     session_id: str,
     *,
@@ -82,13 +96,12 @@ def build_delete_plan(
         full_id = sess.session_id
         project_slug = project_slug or sess.project_slug
     else:
-        from axism.discover import find_session
-
-        if not find_session(session_id, root):
-            orphan = collect_fragments(session_id, project_slug=project_slug, root=root)
+        full_id = session_id.lower()
+        if not _transcript_exists(full_id, project_slug, root):
+            orphan = collect_fragments(full_id, project_slug=project_slug, root=root)
             if not orphan.deletable:
                 return DeletePlan(
-                    session_id=session_id,
+                    session_id=full_id,
                     inventory=orphan,
                     blocked_reason="session not found",
                     hard_blocked=True,

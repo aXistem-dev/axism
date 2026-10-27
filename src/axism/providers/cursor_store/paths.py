@@ -41,7 +41,7 @@ def chats_dir(root: Path) -> Path:
 
 
 def is_chat_id(name: str) -> bool:
-    return bool(_UUID_RE.match(name))
+    return bool(_UUID_RE.fullmatch(name))
 
 
 def slugify_path(path: str | Path) -> str:

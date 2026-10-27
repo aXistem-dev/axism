@@ -332,3 +332,38 @@ def test_symlinked_project_dir_is_refused_and_target_survives(fake_root):
     actions = execute_project_delete(plan, root=fake_root, dry_run=False, force=True)
     assert actions and actions[0].startswith("aborted")
     assert (projects / DEMO_SLUG / f"{SESSION_A}.jsonl").exists()
+
+
+def test_full_uuid_plan_does_not_scan_every_transcript(fake_root, monkeypatch):
+    from axism import discover
+
+    def boom(*a, **k):
+        raise AssertionError("full scan")
+
+    monkeypatch.setattr(discover, "discover_all", boom)
+    monkeypatch.setattr(discover, "find_session", boom)
+    plan = build_delete_plan(SESSION_A, root=fake_root, use_cli=False)
+    assert not plan.hard_blocked and plan.can_delete
+    scoped = build_delete_plan(
+        SESSION_A, project_slug=DEMO_SLUG, root=fake_root, use_cli=False
+    )
+    assert not scoped.hard_blocked
+    ghost = "99999999-9999-9999-9999-999999999999"
+    assert build_delete_plan(ghost, root=fake_root, use_cli=False).hard_blocked
+
+
+def test_uuid_with_trailing_newline_is_not_a_uuid(fake_root):
+    from axism.paths import is_session_uuid
+    from axism.providers.cursor_store.paths import is_chat_id
+
+    assert not is_session_uuid(SESSION_A + "\n")
+    assert not is_chat_id(SESSION_A + "\n")
+    # Resolved through the lenient prefix lookup, never an empty "success".
+    plan = build_delete_plan(SESSION_A + "\n", root=fake_root, use_cli=False)
+    assert plan.session_id == SESSION_A and plan.inventory.deletable
+
+
+def test_uppercase_uuid_resolves_to_the_lowercase_session(fake_root):
+    plan = build_delete_plan(SESSION_A.upper(), root=fake_root, use_cli=False)
+    assert plan.session_id == SESSION_A
+    assert not plan.hard_blocked and plan.inventory.deletable
