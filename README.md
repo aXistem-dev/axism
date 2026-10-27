@@ -86,7 +86,7 @@ Everything the app does is also available as a command, which is handy for scrip
 A few things worth knowing:
 
 - Session IDs can be shortened to any unique prefix.
-- `delete`, `delete-project`, `purge-project`, and `stop` only show a preview until you add `--yes`. `move` and `export` take `--dry-run` to preview.
+- `delete`, `delete-project`, `purge-project`, and `stop` only show a preview until you add `--yes`. `delete` and `delete-project` exit 1 after that bare preview, 0 after an explicit `--dry-run` or a completed `--yes` run, and 2 whenever the plan is blocked (not found, or a live session without `--force`). `move` and `export` take `--dry-run` to preview; `move` refuses sessions that are running unless you pass `--force`.
 - `list` covers every enabled agent. Other commands use the default agent (Claude Code unless you change it), so add `--provider cursor` or `--provider hermes` to work on those sessions.
 
 ```bash

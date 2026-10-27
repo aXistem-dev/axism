@@ -183,21 +183,20 @@ def cmd_delete(args: argparse.Namespace) -> int:
             print(line)
         print()
 
+    blocked = [p for p in plans if p.hard_blocked or (not p.can_delete and not args.force)]
     if args.dry_run or not args.yes:
         actions = provider.execute_deletes(plans, dry_run=True, force=args.force)
         print("-- dry-run --")
         for a in actions:
             print(a)
-        if not args.yes:
-            if not args.dry_run:
-                print(
-                    "Refusing to delete without --yes (pass --dry-run to preview only).",
-                    file=sys.stderr,
-                )
-            blocked = [
-                p for p in plans if p.hard_blocked or (not p.can_delete and not args.force)
-            ]
-            return 0 if not blocked else 2
+        if blocked:
+            return 2
+        if not args.yes and not args.dry_run:
+            print(
+                "Refusing to delete without --yes (pass --dry-run to preview only).",
+                file=sys.stderr,
+            )
+            return 1
         return 0
 
     blocked = [p for p in plans if p.hard_blocked or (not p.can_delete and not args.force)]
@@ -228,6 +227,7 @@ def cmd_delete_project(args: argparse.Namespace) -> int:
     for line in plan.summary_lines():
         print(line)
 
+    blocked = plan.hard_blocked or (not plan.can_delete and not args.force)
     if args.dry_run or not args.yes:
         actions = provider.execute_project_delete(
             plan, dry_run=True, force=args.force
@@ -235,16 +235,17 @@ def cmd_delete_project(args: argparse.Namespace) -> int:
         print("-- dry-run --")
         for a in actions:
             print(a)
-        if not args.yes:
-            if not args.dry_run:
-                print(
-                    "Refusing to delete without --yes (pass --dry-run to preview only).",
-                    file=sys.stderr,
-                )
-            return 0 if not plan.hard_blocked and (plan.can_delete or args.force) else 2
+        if blocked:
+            return 2
+        if not args.yes and not args.dry_run:
+            print(
+                "Refusing to delete without --yes (pass --dry-run to preview only).",
+                file=sys.stderr,
+            )
+            return 1
         return 0
 
-    if plan.hard_blocked or (not plan.can_delete and not args.force):
+    if blocked:
         print(f"Blocked: {plan.blocked_reason}", file=sys.stderr)
         return 2
 
@@ -352,6 +353,40 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
+def _live_session_count(
+    provider: SessionProvider, sessions: list, *, use_cli: bool
+) -> int:
+    """How many of ``sessions`` look running (same test the TUI uses before a move)."""
+    live_map = provider.merge_live(use_cli=use_cli)
+    n = 0
+    for s in sessions:
+        live = live_for_session(live_map, s)
+        if live is None:
+            continue
+        if live.is_killable or (
+            live.kind == "background"
+            and live.state in {"working", "blocked", "running"}
+        ):
+            n += 1
+    return n
+
+
+def _refuse_live_move(
+    provider: SessionProvider, sessions: list, args: argparse.Namespace
+) -> bool:
+    if args.force:
+        return False
+    n = _live_session_count(provider, sessions, use_cli=not args.no_cli)
+    if not n:
+        return False
+    print(
+        f"axism: {n} live/background session(s) — stop them first "
+        "(`axism stop`) or pass --force",
+        file=sys.stderr,
+    )
+    return True
+
+
 def cmd_move(args: argparse.Namespace) -> int:
     provider = _provider(args)
     root = provider.config_root()
@@ -371,6 +406,8 @@ def cmd_move(args: argparse.Namespace) -> int:
                 print(f"Project not found: {key}", file=sys.stderr)
                 return 1
             targets.append(p)
+        if _refuse_live_move(provider, [s for p in targets for s in p.sessions], args):
+            return 2
         merge_memory = not args.no_merge_memory
         result = provider.move_projects(
             targets,
@@ -387,6 +424,8 @@ def cmd_move(args: argparse.Namespace) -> int:
                 return 1
             _proj, sess = found
             sessions.append(sess)
+        if _refuse_live_move(provider, sessions, args):
+            return 2
         result = provider.move_sessions(sessions, args.to, dry_run=args.dry_run)
     for line in result.actions:
         print(line)
@@ -590,6 +629,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Show plan without moving",
+    )
+    move.add_argument(
+        "--force",
+        action="store_true",
+        help="Move even when a session looks live or running",
     )
     move.add_argument(
         "--no-merge-memory",

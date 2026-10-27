@@ -9,10 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `delete` and `delete-project` without `--yes` or `--dry-run` now print the preview and exit 1; an explicit `--dry-run` exits 0, and a blocked plan exits 2 in every mode (including `--dry-run --yes`)
 - Responsive projects/sessions tables: density modes (full/cozy/tight), flex pane ratios with min-widths, agent glyph inlined when narrow, and horizontal scrollbars disabled so small terminals stay keyboard-friendly
 
 ### Fixed
 
+- `axism move` refuses sessions (and projects containing sessions) that are running, as the TUI does; `--force` overrides
 - `--config-dir` works when the saved active backend is unknown or disabled (it falls back to Claude Code like a plain run), and a settings file that is not valid UTF-8 or has a non-boolean `enabled` no longer breaks startup
 - Cursor and Hermes: session ids that are not plain ids (`.`, `..`, empty, containing `/`) match nothing and are refused even with `--force`; only paths strictly inside the session stores are removed, and a symlinked session file or store is unlinked without touching what it points to
 - Hermes: commands run against the configured Hermes home are pinned to its default profile, so a sticky active profile can no longer redirect a rename, delete or resume to another profile; renaming to a title that starts with `-` works
