@@ -11,7 +11,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Buy Me A Coffee](https://img.shields.io/badge/buy%20me%20a%20coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/confituurke)
 
-aXism is a terminal app plus a command-line tool. It finds every session from **Claude Code**, **Cursor**, and **Hermes**, groups them by project, and lets you open, stop, rename, move, or delete them without digging through hidden folders. It runs on Linux and macOS.
+aXism, a tool by aXistem, is a terminal app plus a command-line tool. It finds every session from **Claude Code**, **Cursor**, and **Hermes**, groups them by project, and lets you open, stop, rename, move, or delete them without digging through hidden folders. It runs on Linux and macOS.
 
 ## Why use it
 

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-10-27
+
 ### Added
 
 - `k` in the project delete dialog keeps the project's `memory/` folder (Claude Code); the dialog says whether it will be deleted or kept and updates as you toggle

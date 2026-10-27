@@ -6,7 +6,7 @@ import re
 import subprocess
 from pathlib import Path
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 
 def _commit_from_build_info() -> str:
