@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -16,24 +17,32 @@ def _commit_from_build_info() -> str:
     return (COMMIT or "").strip()
 
 
-def _commit_from_git() -> str:
-    """Short hash when running from a checkout (or any ancestor with .git)."""
-    here = Path(__file__).resolve().parent
-    for root in (here, *here.parents):
-        if not (root / ".git").exists():
-            continue
-        try:
-            out = subprocess.run(
-                ["git", "-C", str(root), "rev-parse", "--short=7", "HEAD"],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=2,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return ""
-        return out.stdout.strip()
-    return ""
+def _is_axism_checkout(root: Path) -> bool:
+    """True when ``root`` is a source tree whose pyproject declares ``axism``."""
+    try:
+        text = (root / "pyproject.toml").read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return re.search(r'^name\s*=\s*["\']axism["\']\s*$', text, re.MULTILINE) is not None
+
+
+def _commit_from_git(package_dir: Path | None = None) -> str:
+    """Short hash, only when the package lives in a source checkout of aXism."""
+    here = package_dir if package_dir is not None else Path(__file__).resolve().parent
+    root = here.resolve().parents[1]
+    if not (root / ".git").exists() or not _is_axism_checkout(root):
+        return ""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--short=7", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return out.stdout.strip()
 
 
 def _resolve_commit() -> str:

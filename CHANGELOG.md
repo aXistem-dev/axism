@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `axism --version` shows a commit suffix only for a source checkout of aXism itself, never for an install that happens to sit inside another git repository
+- The release workflow stops when the tag does not match the package version, and runs the tests and lint before building and publishing
 - Copying a Hermes session to another agent fails cleanly (and exits non-zero) when the Hermes export fails, instead of writing a stub session; a relative `--to` resolves against the current directory, an empty one is an error, and a custom title is carried over from Claude Code transcripts
 - `axism move` refuses sessions (and projects containing sessions) that are running, as the TUI does; `--force` overrides
 - `--config-dir` works when the saved active backend is unknown or disabled (it falls back to Claude Code like a plain run), and a settings file that is not valid UTF-8 or has a non-boolean `enabled` no longer breaks startup
