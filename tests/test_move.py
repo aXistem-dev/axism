@@ -266,3 +266,73 @@ def test_merge_project_memory_source_only(fake_root: Path):
     assert (other / "memory" / "MEMORY.md").is_file()
     assert assess_memory_merge([demo], other).file_count >= 0
     assert any("moved memory" in a for a in actions)
+
+
+def test_move_into_hyphenated_project_uses_real_cwd(fake_root: Path):
+    real = "/home/alice/src/demo-v2"
+    slug = "-home-alice-src-demo-v2"
+    write_jsonl(
+        fake_root / "projects" / slug / "44444444-4444-4444-4444-444444444444.jsonl",
+        [{"type": "user", "cwd": real, "message": {"role": "user", "content": "x"}}],
+    )
+    demo = next(p for p in discover_all(fake_root) if p.slug == DEMO_SLUG)
+    r = move_sessions(demo.sessions[:1], slug, root=fake_root)
+    assert r.ok, r.message
+    assert r.dest_cwd == real
+    sid = demo.sessions[0].session_id
+    text = (fake_root / "projects" / slug / f"{sid}.jsonl").read_text()
+    assert real in text
+    assert not Path("/home/alice/src/demo/v2").exists()
+
+
+def test_move_rewrites_lone_surrogate_lines(fake_root: Path):
+    p = fake_root / "projects" / DEMO_SLUG / f"{SESSION_B}.jsonl"
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write(
+            '{"type":"user","cwd":"' + DEMO_CWD + '","message":{"content":"\\ud83d"}}\n'
+        )
+    demo = next(p for p in discover_all(fake_root) if p.slug == DEMO_SLUG)
+    sess = [s for s in demo.sessions if s.session_id == SESSION_B]
+    r = move_sessions(sess, OTHER_CWD, root=fake_root)
+    assert r.ok, r.message
+    dest = fake_root / "projects" / OTHER_SLUG
+    assert not list(dest.glob("*.tmp"))
+    text = (dest / f"{SESSION_B}.jsonl").read_text(encoding="utf-8")
+    assert text.count(OTHER_CWD) == 2
+    assert DEMO_CWD not in text
+
+
+def test_project_rename_fails_cleanly_when_workspace_is_a_file(
+    fake_root: Path, tmp_path: Path
+):
+    blocker = tmp_path / "occupied"
+    blocker.write_text("file")
+    demo = next(p for p in discover_all(fake_root) if p.slug == DEMO_SLUG)
+    r = move_projects([demo], str(blocker), root=fake_root)
+    assert r.ok is False
+    assert (fake_root / "projects" / DEMO_SLUG / f"{SESSION_A}.jsonl").is_file()
+    assert not (fake_root / "projects" / encode_project_slug(str(blocker))).exists()
+
+
+def test_project_rename_rewrites_subagent_transcripts(fake_root: Path):
+    sub = fake_root / "projects" / DEMO_SLUG / SESSION_A / "subagents"
+    write_jsonl(sub / "agent-cafe.jsonl", [{"type": "user", "cwd": DEMO_CWD}])
+    demo = next(p for p in discover_all(fake_root) if p.slug == DEMO_SLUG)
+    assert move_projects([demo], OTHER_CWD, root=fake_root).ok
+    moved = (
+        fake_root / "projects" / OTHER_SLUG / SESSION_A / "subagents" / "agent-cafe.jsonl"
+    )
+    assert OTHER_CWD in moved.read_text()
+    assert DEMO_CWD not in moved.read_text()
+
+
+def test_session_move_rewrites_subagent_transcripts(fake_root: Path):
+    sub = fake_root / "projects" / DEMO_SLUG / SESSION_A / "subagents"
+    write_jsonl(sub / "agent-cafe.jsonl", [{"type": "user", "cwd": DEMO_CWD}])
+    demo = next(p for p in discover_all(fake_root) if p.slug == DEMO_SLUG)
+    sess = [s for s in demo.sessions if s.session_id == SESSION_A]
+    assert move_sessions(sess, OTHER_CWD, root=fake_root).ok
+    moved = (
+        fake_root / "projects" / OTHER_SLUG / SESSION_A / "subagents" / "agent-cafe.jsonl"
+    )
+    assert OTHER_CWD in moved.read_text()

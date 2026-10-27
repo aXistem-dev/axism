@@ -82,6 +82,18 @@ def normalize_dest_cwd(dest: str) -> str:
         return str(path)
 
 
+def _project_real_cwd(project: ProjectInfo, typed: str | None) -> str:
+    """Real cwd of an existing project, never a slug-decoded guess when avoidable.
+
+    The slug encoding is lossy. Prefer the newest transcript ``cwd`` that differs
+    from the decoded guess, then the typed path, then the guess.
+    """
+    for s in project.sessions:  # newest first
+        if s.cwd and s.cwd != project.cwd_guess:
+            return s.cwd
+    return typed or project.cwd_guess
+
+
 def resolve_dest(
     dest: str,
     *,
@@ -99,7 +111,7 @@ def resolve_dest(
 
     if text in by_slug:
         p = by_slug[text]
-        return p.cwd_guess, p.slug, p.path
+        return _project_real_cwd(p, None), p.slug, p.path
 
     if text.startswith("-") and "/" not in text:
         return None
@@ -107,13 +119,15 @@ def resolve_dest(
     cwd = normalize_dest_cwd(text)
     if not cwd:
         return None
-    if cwd in by_cwd:
-        p = by_cwd[cwd]
-        return p.cwd_guess, p.slug, p.path
-
     slug = encode_project_slug(cwd)
     if not slug or slug in {".", ".."}:
         return None
+    if slug in by_slug:
+        p = by_slug[slug]
+        return _project_real_cwd(p, cwd), p.slug, p.path
+    if cwd in by_cwd:
+        p = by_cwd[cwd]
+        return _project_real_cwd(p, cwd), p.slug, p.path
     dest_path = projects_dir(root) / slug
     try:
         dest_path.resolve().relative_to(projects_dir(root).resolve())
@@ -345,6 +359,16 @@ def merge_project_memory(
     return actions, needs_agent, stats, parked, renamed
 
 
+def _dump_line(obj: object) -> str:
+    """Serialize one JSONL record; fall back to ASCII escapes for lone surrogates."""
+    try:
+        text = json.dumps(obj, ensure_ascii=False) + "\n"
+        text.encode("utf-8")
+        return text
+    except UnicodeEncodeError:
+        return json.dumps(obj, ensure_ascii=True) + "\n"
+
+
 def _rewrite_cwd_in_jsonl(
     path: Path, new_cwd: str, *, old_cwds: set[str] | None = None
 ) -> int:
@@ -369,7 +393,7 @@ def _rewrite_cwd_in_jsonl(
                     should = old_cwds is None or cur in old_cwds
                     if should and cur != new_cwd:
                         obj["cwd"] = new_cwd
-                        out = json.dumps(obj, ensure_ascii=False) + "\n"
+                        out = _dump_line(obj)
                         changed += 1
                 dst.write(out)
         os.replace(tmp, path)
@@ -378,6 +402,18 @@ def _rewrite_cwd_in_jsonl(
             tmp.unlink(missing_ok=True)
         raise
     return changed
+
+
+def _rewrite_subagent_cwds(session_dir: Path, new_cwd: str) -> int:
+    """Rewrite ``cwd`` in ``<session_dir>/subagents/*.jsonl``. Returns lines changed."""
+    sub = session_dir / "subagents"
+    if not sub.is_dir():
+        return 0
+    total = 0
+    for f in sorted(sub.glob("*.jsonl")):
+        if f.is_file() and not f.is_symlink():
+            total += _rewrite_cwd_in_jsonl(f, new_cwd)
+    return total
 
 
 def _rewrite_history_project(
@@ -404,7 +440,7 @@ def _rewrite_history_project(
                     and obj.get("project") != new_cwd
                 ):
                     obj["project"] = new_cwd
-                    dst.write(json.dumps(obj, ensure_ascii=False) + "\n")
+                    dst.write(_dump_line(obj))
                     changed += 1
                 else:
                     dst.write(line if line.endswith("\n") else line + "\n")
@@ -576,6 +612,7 @@ def move_sessions(
                 shutil.move(str(src_dir), str(dest_dir))
                 actions.append(f"moved {s.session_id[:8]}…/ subdir")
             n = _rewrite_cwd_in_jsonl(dest_jsonl, dest_cwd)
+            n += _rewrite_subagent_cwds(dest_dir, dest_cwd)
             actions.append(f"rewrote cwd in {n} transcript line(s)")
             job_msg = _update_job_cwd(root, s.session_id, dest_cwd)
             if job_msg:
@@ -665,9 +702,9 @@ def move_projects(
         try:
             _ensure_under_projects(src.path, root)
             _ensure_under_projects(dest_path.parent / dest_slug, root)
+            ws = _ensure_workspace_cwd(dest_cwd)
             os.replace(src.path, dest_path)
             actions.append(f"renamed project dir → {dest_slug}")
-            ws = _ensure_workspace_cwd(dest_cwd)
             if ws:
                 actions.append(ws)
         except (OSError, ValueError) as exc:
@@ -686,6 +723,7 @@ def move_projects(
                     # (hyphens vs path separators), so filtering on old_cwd misses most
                     # lines when sessions had nested or hyphenated paths.
                     n = _rewrite_cwd_in_jsonl(entry, dest_cwd)
+                    n += _rewrite_subagent_cwds(dest_path / entry.stem, dest_cwd)
                     actions.append(f"{entry.stem[:8]}…: rewrote {n} cwd line(s)")
                     job_msg = _update_job_cwd(root, entry.stem, dest_cwd)
                     if job_msg:

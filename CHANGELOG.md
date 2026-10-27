@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deletes only remove paths strictly inside the projects, config or scratch roots (anything else is reported as `refused:`), and session ids that are not plain ids match nothing
 - Symlinked session fragments are unlinked without touching what they point to
 - A session id prefix that matches several sessions is refused with the list of matching ids (exit code 2) instead of acting on the first match, so `delete`, `rename` and similar commands never touch the wrong session
+- Moving sessions into an existing project whose folder name contains a hyphen uses that project's real working directory instead of a guessed one, so no stray directory is created
+- Moving a transcript that contains a lone emoji surrogate (`\ud83d`) now completes instead of failing and leaving a temp file
+- Renaming a project checks the destination workspace first, so a failure leaves the project untouched
+- Moving or renaming also updates the working directory in subagent transcripts
 - README links (License, CI workflow, AGENTS.md, CHANGELOG.md) now use absolute GitHub URLs so they resolve correctly from the PyPI project page instead of only working on GitHub
 
 ## [0.1.1] — 2026-09-23
