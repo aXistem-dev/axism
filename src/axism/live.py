@@ -169,7 +169,24 @@ def load_job_states(root: Path | None = None) -> dict[str, LiveSession]:
     return out
 
 
-def load_claude_agents_json(timeout: float = 8.0) -> dict[str, LiveSession]:
+def claude_env(root: Path | None) -> dict[str, str] | None:
+    """Environment for ``claude`` subprocesses: pins the config dir for a non-default root.
+
+    Returns None (inherit the environment unchanged) for the default root.
+    """
+    if root is None:
+        return None
+    try:
+        if Path(root).expanduser().resolve() == config_root().resolve():
+            return None
+    except OSError:
+        pass
+    return {**os.environ, "CLAUDE_CONFIG_DIR": str(Path(root).expanduser().resolve())}
+
+
+def load_claude_agents_json(
+    timeout: float = 8.0, *, root: Path | None = None
+) -> dict[str, LiveSession]:
     """Call ``claude agents --json --all`` when available."""
     if not shutil.which("claude"):
         return {}
@@ -180,6 +197,7 @@ def load_claude_agents_json(timeout: float = 8.0) -> dict[str, LiveSession]:
             text=True,
             timeout=timeout,
             check=False,
+            env=claude_env(root),
         )
     except (OSError, subprocess.TimeoutExpired):
         return {}
@@ -219,12 +237,14 @@ def merge_live(root: Path | None = None, *, use_cli: bool = True) -> dict[str, L
     merged.update(load_job_states(root))
     merged.update(load_filesystem_live(root))
     if use_cli:
-        for sid, live in load_claude_agents_json().items():
+        for sid, live in load_claude_agents_json(root=root).items():
             merged[sid] = live
     return merged
 
 
-def stop_background(session_or_short: str, *, retries: int = 3) -> tuple[bool, str]:
+def stop_background(
+    session_or_short: str, *, retries: int = 3, root: Path | None = None
+) -> tuple[bool, str]:
     """Try ``claude stop`` / ``kill`` / ``rm`` for a background session.
 
     Claude's daemon sometimes returns a transient “restarting” error for blocked
@@ -245,7 +265,12 @@ def stop_background(session_or_short: str, *, retries: int = 3) -> tuple[bool, s
         for cmd in cmds:
             try:
                 proc = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=30, check=False
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    check=False,
+                    env=claude_env(root),
                 )
                 out = (proc.stdout or proc.stderr or "").strip()
                 messages.append(
@@ -299,6 +324,7 @@ def slash_stop(
                 text=True,
                 timeout=30,
                 check=False,
+                env=claude_env(root),
             )
             out = (proc.stdout or proc.stderr or "").strip()
             messages.append(f"claude stop {short} -> rc={proc.returncode} {out[:240]}")
@@ -416,10 +442,10 @@ def kill_live_session(
         live.daemon_short and live.state in {"working", "blocked", "running"}
     ):
         target = live.daemon_short or session_id
-        ok, msg = stop_background(target)
+        ok, msg = stop_background(target, root=root)
         messages.append(msg)
         if not ok and live.daemon_short and live.daemon_short != session_id[:8]:
-            ok2, msg2 = stop_background(session_id)
+            ok2, msg2 = stop_background(session_id, root=root)
             messages.append(msg2)
             ok = ok or ok2
 
@@ -477,7 +503,11 @@ def kill_live_session(
 
 
 def purge_project_cli(
-    path: str | None = None, *, dry_run: bool = True, all_projects: bool = False
+    path: str | None = None,
+    *,
+    dry_run: bool = True,
+    all_projects: bool = False,
+    root: Path | None = None,
 ) -> tuple[int, str]:
     """Shell out to ``claude project purge``."""
     if not shutil.which("claude"):
@@ -495,7 +525,12 @@ def purge_project_cli(
         cmd.append("-y")
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=120, check=False
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+            env=claude_env(root),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return 1, str(exc)
@@ -535,6 +570,7 @@ def exec_open(
     *,
     cwd: str | None = None,
     live: LiveSession | None = None,
+    root: Path | None = None,
 ) -> None:
     """Replace this process with ``claude attach`` or ``claude --resume``.
 
@@ -548,6 +584,9 @@ def exec_open(
         path = Path(workdir).expanduser()
         if path.is_dir():
             os.chdir(path)
+    env = claude_env(root)
+    if env is not None:
+        os.execvpe(argv[0], argv, env)
     os.execvp(argv[0], argv)
 
 

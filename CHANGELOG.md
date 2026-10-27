@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Moving a transcript that contains a lone emoji surrogate (`\ud83d`) now completes instead of failing and leaving a temp file
 - Renaming a project checks the destination workspace first, so a failure leaves the project untouched
 - Moving or renaming also updates the working directory in subagent transcripts
+- A config directory chosen in Settings now also applies to the Claude Code commands aXism runs (stop, purge, live listing, open/resume), so they act on the same sessions you see
 - README links (License, CI workflow, AGENTS.md, CHANGELOG.md) now use absolute GitHub URLs so they resolve correctly from the PyPI project page instead of only working on GitHub
 
 ## [0.1.1] — 2026-09-23

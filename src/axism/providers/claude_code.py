@@ -81,7 +81,7 @@ class ClaudeCodeProvider(ProviderBase):
 
     def resume(self, session: SessionMeta, live: LiveSession | None = None) -> None:
         """Attach to active background jobs; otherwise ``claude --resume``."""
-        exec_open(session.session_id, cwd=session.cwd, live=live)
+        exec_open(session.session_id, cwd=session.cwd, live=live, root=self.config_root())
 
     def can_stop(self, live: LiveSession | None) -> bool:
         """Only background jobs: ``/stop`` does not exist for interactive sessions."""
@@ -202,7 +202,9 @@ class ClaudeCodeProvider(ProviderBase):
     def purge_project(
         self, path: str | None = None, *, dry_run: bool = True, all_projects: bool = False
     ) -> tuple[int, str]:
-        return purge_project_cli(path, dry_run=dry_run, all_projects=all_projects)
+        return purge_project_cli(
+            path, dry_run=dry_run, all_projects=all_projects, root=self.config_root()
+        )
 
 
 def default_provider() -> ClaudeCodeProvider:
