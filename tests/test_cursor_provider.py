@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from axism.delete import ProjectDeletePlan
 from axism.providers import get_provider
 from axism.providers.cursor import CursorProvider
 from axism.providers.cursor_store.discover import read_cli_meta
@@ -280,3 +281,74 @@ def test_unsupported_operations_are_explicit(cursor_env: tuple[Path, str]):
     rc, msg = provider.purge_project("/anything")
     assert rc == 1
     assert "purge" in msg
+
+
+def test_project_delete_of_unknown_project_never_executes(
+    cursor_env: tuple[Path, str], tmp_path: Path, capsys: pytest.CaptureFixture
+):
+    root, _ = cursor_env
+    victim = tmp_path / "myrepo"
+    victim.mkdir()
+    (victim / "keep.txt").write_text("x", encoding="utf-8")
+    provider = CursorProvider()
+
+    plan = provider.plan_project_delete(str(victim), force=True)
+    assert plan.hard_blocked
+    actions = provider.execute_project_delete(plan, dry_run=False, force=True)
+    assert actions and actions[0].startswith("aborted")
+    assert (victim / "keep.txt").exists()
+
+    from axism.cli import main
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "delete-project", "--provider", "cursor",
+                "--config-dir", str(root), str(victim), "--yes", "--force",
+            ]
+        )
+    assert exc.value.code != 0
+    assert victim.is_dir()
+
+
+def test_project_delete_refuses_targets_outside_the_stores(
+    cursor_env: tuple[Path, str], tmp_path: Path
+):
+    root, _ = cursor_env
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    provider = CursorProvider()
+    for target in (outside, root / "projects", root / "chats", root):
+        plan = ProjectDeletePlan(slug="x", project_path=target, extra_paths=[outside])
+        actions = provider.execute_project_delete(plan, dry_run=False, force=True)
+        assert any(a.startswith("refused: ") for a in actions), (target, actions)
+    assert outside.is_dir() and (root / "projects").is_dir() and (root / "chats").is_dir()
+
+
+def test_project_delete_keeps_protected_entries(cursor_env: tuple[Path, str]):
+    root, _ = cursor_env
+    provider = CursorProvider()
+    project = provider.discover()[0]
+    pdir = root / "projects" / project.slug
+    (pdir / "mcps").mkdir()
+    (pdir / "mcps" / "server.json").write_text("{}", encoding="utf-8")
+    (pdir / "mcp-auth.json").write_text("{}", encoding="utf-8")
+    (pdir / ".workspace-trusted").write_text("{}", encoding="utf-8")
+    (pdir / "scratch.txt").write_text("x", encoding="utf-8")
+
+    plan = provider.plan_project_delete(project.slug)
+    provider.execute_project_delete(plan, dry_run=False, force=True)
+    assert (pdir / "mcps" / "server.json").exists()
+    assert (pdir / "mcp-auth.json").exists()
+    assert (pdir / ".workspace-trusted").exists()
+    assert not (pdir / "agent-transcripts").exists()
+    assert not (pdir / "scratch.txt").exists()
+
+
+def test_project_delete_removes_dir_when_nothing_protected(cursor_env: tuple[Path, str]):
+    root, _ = cursor_env
+    provider = CursorProvider()
+    project = provider.discover()[0]
+    plan = provider.plan_project_delete(project.slug)
+    provider.execute_project_delete(plan, dry_run=False, force=True)
+    assert not (root / "projects" / project.slug).exists()

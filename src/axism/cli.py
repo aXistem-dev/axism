@@ -186,11 +186,13 @@ def cmd_delete(args: argparse.Namespace) -> int:
                     "Refusing to delete without --yes (pass --dry-run to preview only).",
                     file=sys.stderr,
                 )
-            blocked = [p for p in plans if not p.can_delete and not args.force]
+            blocked = [
+                p for p in plans if p.hard_blocked or (not p.can_delete and not args.force)
+            ]
             return 0 if not blocked else 2
         return 0
 
-    blocked = [p for p in plans if not p.can_delete and not args.force]
+    blocked = [p for p in plans if p.hard_blocked or (not p.can_delete and not args.force)]
     if blocked:
         for p in blocked:
             print(f"Blocked: {p.session_id}: {p.blocked_reason}", file=sys.stderr)
@@ -231,10 +233,10 @@ def cmd_delete_project(args: argparse.Namespace) -> int:
                     "Refusing to delete without --yes (pass --dry-run to preview only).",
                     file=sys.stderr,
                 )
-            return 0 if plan.can_delete or args.force else 2
+            return 0 if not plan.hard_blocked and (plan.can_delete or args.force) else 2
         return 0
 
-    if not plan.can_delete and not args.force:
+    if plan.hard_blocked or (not plan.can_delete and not args.force):
         print(f"Blocked: {plan.blocked_reason}", file=sys.stderr)
         return 2
 

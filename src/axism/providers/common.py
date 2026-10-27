@@ -153,7 +153,7 @@ def execute_fragment_deletes(
     if not plans:
         return ["nothing to delete"]
 
-    blocked = [p for p in plans if p.blocked_reason and not force]
+    blocked = [p for p in plans if p.hard_blocked or (p.blocked_reason and not force)]
     if blocked:
         return [f"aborted {p.session_id}: {p.blocked_reason}" for p in blocked]
 
@@ -166,8 +166,8 @@ def execute_fragment_deletes(
             else:
                 ok, msg = stop_fn(plan.session_id, live)
                 actions.append(f"{short}: stop: {msg}")
-                if not ok and not force:
-                    actions.append(f"{short}: aborted: could not stop live session")
+                if not ok:
+                    actions.append(f"aborted: could not stop live session ({short})")
                     continue
 
         for frag in plan.inventory.deletable:

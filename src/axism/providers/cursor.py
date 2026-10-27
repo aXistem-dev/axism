@@ -7,7 +7,7 @@ from pathlib import Path
 
 from axism.delete import DeletePlan, ProjectDeletePlan
 from axism.discover import ProjectInfo, SessionMeta
-from axism.fragments import FragmentInventory
+from axism.fragments import PROTECTED_NAMES, FragmentInventory
 from axism.live import LiveSession
 from axism.move import MoveResult
 from axism.paths import path_size
@@ -160,6 +160,7 @@ class CursorProvider(ProviderBase):
                         session_id=session_id, project_slug=project_slug
                     ),
                     blocked_reason="session not found",
+                    hard_blocked=True,
                 )
             _proj, sess = found
             full_id = sess.session_id
@@ -205,10 +206,13 @@ class CursorProvider(ProviderBase):
             slug = slugify_path(Path(slug_or_path).expanduser())
             project = projects.get(slug)
         if project is None:
+            # Never point the plan at the caller's input: an absolute path
+            # would escape the store when joined.
             return ProjectDeletePlan(
                 slug=slug_or_path,
-                project_path=projects_dir(root) / slug_or_path,
+                project_path=projects_dir(root) / slugify_path(slug_or_path),
                 blocked_reason=f"project not found: {slug_or_path}",
+                hard_blocked=True,
             )
 
         project_path = projects_dir(root) / project.slug
@@ -252,7 +256,7 @@ class CursorProvider(ProviderBase):
         stop_live: bool = True,
     ) -> list[str]:
         actions: list[str] = []
-        if plan.blocked_reason and not force:
+        if plan.hard_blocked or (plan.blocked_reason and not force):
             return [f"aborted: {plan.blocked_reason}"]
 
         if plan.session_plans:
@@ -264,18 +268,77 @@ class CursorProvider(ProviderBase):
                     stop_live=stop_live,
                 )
             )
+            if any(
+                a.startswith("aborted: could not stop live session") for a in actions
+            ):
+                actions.append(
+                    "aborted: project kept because a live session could not be stopped"
+                )
+                return actions
 
+        root = self.config_root()
+        pdir = projects_dir(root)
+        cdir = chats_dir(root)
         for target in [plan.project_path, *plan.extra_paths]:
+            if not (
+                _strictly_inside(target, pdir) or _strictly_inside(target, cdir)
+            ):
+                actions.append(f"refused: {target} outside {pdir} and {cdir}")
+                continue
             if not target.is_dir():
                 continue
-            if dry_run:
+            if _strictly_inside(target, pdir):
+                actions.extend(_remove_project_dir(target, dry_run=dry_run))
+            elif dry_run:
                 actions.append(f"would remove {target} ({path_size(target)} B)")
-                continue
-            try:
-                actions.append(remove_path(target))
-            except OSError as exc:
-                actions.append(f"error removing {target}: {exc}")
+            else:
+                try:
+                    actions.append(remove_path(target))
+                except OSError as exc:
+                    actions.append(f"error removing {target}: {exc}")
         return actions
+
+
+KEPT_PROJECT_ENTRIES = PROTECTED_NAMES | {".workspace-trusted"}
+
+
+def _strictly_inside(path: Path, base: Path) -> bool:
+    """True when ``path`` resolves to a descendant of ``base``, never ``base``."""
+    try:
+        resolved = path.resolve()
+        root = base.resolve()
+    except OSError:
+        return False
+    return resolved != root and root in resolved.parents
+
+
+def _remove_project_dir(project: Path, *, dry_run: bool) -> list[str]:
+    """Remove a workspace dir's contents except credentials and agent config."""
+    actions: list[str] = []
+    kept = 0
+    for child in sorted(project.iterdir()):
+        if child.name in KEPT_PROJECT_ENTRIES:
+            kept += 1
+            actions.append(f"kept {child}")
+            continue
+        if dry_run:
+            actions.append(f"would remove {child} ({path_size(child)} B)")
+            continue
+        try:
+            actions.append(remove_path(child))
+        except OSError as exc:
+            kept += 1
+            actions.append(f"error removing {child}: {exc}")
+    if kept == 0:
+        if dry_run:
+            actions.append(f"would remove {project}")
+        else:
+            try:
+                project.rmdir()
+                actions.append(f"removed dir {project}")
+            except OSError as exc:
+                actions.append(f"error removing {project}: {exc}")
+    return actions
 
 
 def workspace_candidates(root: Path | None = None) -> list[str]:
