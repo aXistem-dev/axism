@@ -157,3 +157,39 @@ def test_detect_never_raises_on_permission_error(
     for pid in ("claude_code", "cursor", "hermes"):
         assert get_provider(pid).detect() is False
     assert detect_undecided_providers(save=False).found == ["claude_code"]
+
+
+def test_unwritable_config_dir_keeps_result_and_notes_it(
+    env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    blocker = tmp_path / "a-file"
+    blocker.write_text("x", encoding="utf-8")
+    monkeypatch.setenv("AXISM_CONFIG_DIR", str(blocker / "cfg"))
+    _claude_data(env["claude"])
+    result = detect_undecided_providers()
+    assert result.changed
+    assert result.found == ["claude_code"]
+    assert result.save_error
+    assert "(could not save settings: " in result.message()
+
+
+def test_cli_runs_with_unwritable_config_dir(
+    env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    blocker = tmp_path / "a-file"
+    blocker.write_text("x", encoding="utf-8")
+    monkeypatch.setenv("AXISM_CONFIG_DIR", str(blocker / "cfg"))
+    _claude_data(env["claude"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["list"])
+    assert exc.value.code == 0
+    assert "could not save settings" in capsys.readouterr().err
+
+
+def test_nothing_detected_with_claude_code_off_says_fallback(env) -> None:
+    _write_settings({"claude_code": False})
+    result = detect_undecided_providers()
+    assert result.found == []
+    assert result.message() == (
+        "No agents found — showing Claude Code; change in Settings (,)"
+    )

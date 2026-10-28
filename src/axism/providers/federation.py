@@ -52,6 +52,7 @@ class DetectionResult:
     found: list[str]
     missing: list[str]
     changed: bool
+    save_error: str = ""
 
     def message(self) -> str:
         from axism.providers import PROVIDER_LABELS
@@ -59,10 +60,16 @@ class DetectionResult:
         def labels(ids: list[str]) -> str:
             return ", ".join(PROVIDER_LABELS.get(i, i) for i in ids)
 
-        text = f"Found {labels(self.found)}" if self.found else "No agents found"
-        if self.missing:
-            text += f"; {labels(self.missing)} not detected"
-        return text + " \u2014 change in Settings (,)"
+        if self.found:
+            text = f"Found {labels(self.found)}"
+            if self.missing:
+                text += f"; {labels(self.missing)} not detected"
+            text += " \u2014 change in Settings (,)"
+        else:
+            text = "No agents found \u2014 showing Claude Code; change in Settings (,)"
+        if self.save_error:
+            text += f" (could not save settings: {self.save_error})"
+        return text
 
 
 def detect_undecided_providers(
@@ -96,11 +103,14 @@ def detect_undecided_providers(
             missing.remove(DEFAULT_PROVIDER)
             found.append(DEFAULT_PROVIDER)
             found.sort(key=list_provider_ids().index)
+    save_error = ""
     if save:
-        save_settings(s)
-    else:
-        s.mark_recorded(set(undecided))
-    return DetectionResult(found, missing, True)
+        try:
+            save_settings(s)
+        except OSError as exc:
+            save_error = exc.strerror or type(exc).__name__
+    s.mark_recorded(set(undecided))
+    return DetectionResult(found, missing, True, save_error)
 
 
 def federate_discover(providers: list[SessionProvider]) -> list[ProjectInfo]:
