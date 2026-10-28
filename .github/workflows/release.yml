@@ -47,6 +47,11 @@ jobs:
               sys.exit(1)
           PY
 
+      # Fails the release when CHANGELOG.md has no section for this version.
+      # Written outside dist/ so it is never uploaded to PyPI.
+      - name: Release notes from CHANGELOG
+        run: python3 scripts/release_notes.py "${GITHUB_REF_NAME}" > "${RUNNER_TEMP}/RELEASE_NOTES.md"
+
       - name: Test
         run: |
           uv sync --extra dev
@@ -65,6 +70,7 @@ jobs:
           files: |
             dist/*.whl
             dist/*.tar.gz
+          body_path: ${{ runner.temp }}/RELEASE_NOTES.md
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

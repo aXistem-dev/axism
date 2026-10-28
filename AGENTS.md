@@ -95,7 +95,7 @@ git push origin v0.1.0
 ```
 
 - **CI** (`.github/workflows/ci.yml`): pytest, ruff, anonymity check; works on GitHub Actions and Forgejo/Gitea/Codeberg Actions.
-- **Release** (`.github/workflows/release.yml`): on tag `v*`, builds wheel/sdist, uploads GitHub release assets, and publishes to PyPI via Trusted Publisher (OIDC).
+- **Release** (`.github/workflows/release.yml`): on tag `v*`, checks the tag against both version fields, runs the tests, builds wheel/sdist, creates the GitHub Release with the version's `CHANGELOG.md` section as its notes (`scripts/release_notes.py`), and publishes to PyPI via Trusted Publisher (OIDC, environment `pypi`).
 
 ## Commits
 
