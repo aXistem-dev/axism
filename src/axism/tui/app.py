@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.events import Key, Resize
+from textual.events import Resize
 from textual.screen import ModalScreen
 from textual.theme import Theme
 from textual.timer import Timer
@@ -47,6 +47,14 @@ from axism.settings import (
     save_settings,
     settings_path,
 )
+from axism.tui.keys import REGISTRY, bindings_for
+
+# Registry scopes whose keys are bound on the main screen.
+MAIN_SCREEN_SCOPES = ("main", "projects", "sessions", "details", "filter")
+# Registry actions that still act while an Input has focus (everything else,
+# printable or not, belongs to the Input: Inputs win).
+INPUT_ACTIONS = frozenset({"back", "next_pane", "previous_pane"})
+REGISTRY_IDS = frozenset(action.id for action in REGISTRY)
 
 # Avoid Rich markup: "[x]" is parsed as a style tag and renders blank.
 MARK_ON = "☑"
@@ -638,9 +646,14 @@ class ConfirmDeleteScreen(ModalScreen[bool]):
 HELP_LEGEND = """[b $accent]aXism keys[/]
 
 [b $primary]Navigate[/]
-  Tab               Switch pane focus (detail → sessions → projects)
-  ← / →             Switch pane focus (spatial left / right)
-  ↑ ↓               Move within a list
+  Tab / Shift+Tab   Next / previous pane (projects → sessions → details)
+  ← / → · h / l     Pane left / right
+  ↑ ↓ · j / k       Move within a list, or scroll the details
+  Home End · g / G  First / last row (top / bottom of the details)
+  Ctrl+D / Ctrl+U   Half page down / up
+  PgDn / PgUp       Page down / up
+  Enter             Projects → sessions → details
+  Esc               Details → back to sessions
 
 [b $primary]Select[/] [dim](pane-aware)[/]
   Space             Projects: toggle project mark · Sessions: toggle session
@@ -662,7 +675,7 @@ HELP_LEGEND = """[b $accent]aXism keys[/]
                     (Tab path field · project merges include memory/)
 
 [b $error]Delete[/]
-  d / D             Projects pane: delete project(s)
+  d / D / Del       Projects pane: delete project(s)
                     Sessions/Detail: delete session(s)
   y / n / Esc       Confirm or cancel in dialogs
   k                 Project delete dialog: keep project memory (default: deleted)
@@ -673,11 +686,11 @@ HELP_LEGEND = """[b $accent]aXism keys[/]
   T                 Cycle theme
   ,                 Settings (include agents + config dirs)
   v / V             Version details
-  ? / h             Help (this legend)
+  ?                 Help (this legend)
   q / Q             Quit
 
-[dim]Footer shows essentials only (pane · select · open · move · delete · settings · help · quit).
-This help lists every key; bindings still hide when unusable in the current pane.[/]
+[dim]This help lists every key; keys that cannot run in the current pane do nothing.
+Inside the filter, typed keys go into the text; Esc clears it and leaves.[/]
 """
 
 
@@ -688,13 +701,12 @@ class HelpScreen(ModalScreen[None]):
         Binding("escape", "close", "Close", show=True, priority=True),
         Binding("q", "close", "Close", show=True, priority=True),
         Binding("question_mark", "close", "Close", show=True, priority=True),
-        Binding("h", "close", "Close", show=False, priority=True),
     ]
 
     def compose(self) -> ComposeResult:
         yield Vertical(
             Static(HELP_LEGEND, id="help-body"),
-            Static("[dim]Esc / q / ? / h  close[/]", id="help-hint"),
+            Static("[dim]Esc / q / ?  close[/]", id="help-hint"),
             id="help-dialog",
         )
 
@@ -1143,6 +1155,10 @@ class AgentPickerScreen(ModalScreen[str | None]):
             self.dismiss(str(event.option.id))
 
 
+class DetailPane(Static, can_focus=True):
+    """Right pane: facts about the highlighted project or session; focusable."""
+
+
 class SessionManagerApp(App[None]):
     """Main TUI: projects | sessions | detail."""
 
@@ -1216,6 +1232,7 @@ class SessionManagerApp(App[None]):
         width: 2fr;
         min-width: 20;
         padding: 0 1;
+        overflow-y: auto;
     }
     /* Below 70 columns: drop the detail pane so projects + sessions both fit. */
     .-narrow #detail {
@@ -1458,43 +1475,8 @@ class SessionManagerApp(App[None]):
     }
     """
 
-    # Footer: essentials only. Full legend via ? / h. Settings (,) for provider/config.
-    BINDINGS = [
-        # Tab cycles right→left (detail → sessions → projects); arrows stay spatial.
-        Binding("tab", "focus_previous", "Pane", show=True),
-        Binding("shift+tab", "focus_next", "Pane", show=False),
-        Binding("right", "pane_right", "Pane", show=False, priority=True),
-        Binding("left", "pane_left", "Pane", show=False, priority=True),
-        Binding("space", "toggle_select", "Select", show=True),
-        Binding("a", "select_all", "All", show=False),
-        Binding("A", "select_all", "All", show=False),
-        Binding("c", "clear_select", "Clear", show=False, priority=True),
-        Binding("C", "clear_select", "Clear", show=False, priority=True),
-        Binding("o", "resume_session", "Open", show=True),
-        Binding("O", "resume_session", "Open", show=False),
-        Binding("s", "stop_sessions", "Stop", show=False, priority=True),
-        Binding("S", "stop_sessions", "Stop", show=False, priority=True),
-        Binding("n", "rename_session", "Rename", show=False, priority=True),
-        Binding("N", "rename_session", "Rename", show=False, priority=True),
-        Binding("slash", "focus_session_filter", "Filter", show=False),
-        Binding("full_stop", "cycle_session_sort", "Sort", show=False),
-        Binding("m", "move_items", "Move", show=True, priority=True),
-        Binding("M", "move_items", "Move", show=False, priority=True),
-        Binding("d", "delete_items", "Delete", show=True, priority=True),
-        Binding("D", "delete_items", "Delete", show=False, priority=True),
-        Binding("r", "refresh", "Refresh", show=False),
-        Binding("R", "refresh", "Refresh", show=False),
-        Binding("t", "pick_theme", "Themes", show=False),
-        Binding("T", "next_theme", "Theme cycle", show=False),
-        Binding("comma", "show_settings", "Settings", show=True, priority=True),
-        Binding("v", "show_version", "Version", show=False, priority=True),
-        Binding("V", "show_version", "Version", show=False, priority=True),
-        Binding("question_mark", "show_help", "Help", show=True),
-        Binding("h", "show_help", "Help", show=False, priority=True),
-        Binding("H", "show_help", "Help", show=False, priority=True),
-        Binding("q", "quit", "Quit", show=True),
-        Binding("Q", "quit", "Quit", show=False),
-    ]
+    # Every main-screen key comes from the key registry (tui/keys.py).
+    BINDINGS = bindings_for(*MAIN_SCREEN_SCOPES)
 
     def __init__(self) -> None:
         super().__init__()
@@ -1532,7 +1514,7 @@ class SessionManagerApp(App[None]):
                     placeholder="/ filter · . sort",
                     id="sessions-filter",
                 )
-            yield Static("Select a session  ·  ? help", id="detail")
+            yield DetailPane("Select a session  ·  ? help", id="detail")
         yield Static("", id="status")
         yield Static("", id="toast")
         yield Footer(compact=True, show_command_palette=False)
@@ -1683,10 +1665,14 @@ class SessionManagerApp(App[None]):
         """Hide/disable keys that cannot run in the current pane or state."""
         if len(self.screen_stack) > 1:
             return False
-        pane = self._focus_pane()
-        if action in {"pane_left", "pane_right"} and isinstance(self.focused, Input):
-            # Left/Right belong to the text cursor while typing in a field.
+        if (
+            isinstance(self.focused, Input)
+            and action in REGISTRY_IDS
+            and action not in INPUT_ACTIONS
+        ):
+            # Inputs win: the key goes to the text field (cursor, Home/End, Del, …).
             return False
+        pane = self._focus_pane()
         if action == "toggle_select" and pane == "detail":
             return False
         if action == "toggle_select" and isinstance(self.focused, Input):
@@ -1734,11 +1720,156 @@ class SessionManagerApp(App[None]):
                 return False
         return True
 
+    # ---- pane focus ---------------------------------------------------------
+
+    def _pane_order(self) -> list[str]:
+        """Focusable main panes, left to right (details hidden when narrow)."""
+        panes = ["projects", "sessions"]
+        if self.query_one("#detail").display:
+            panes.append("detail")
+        return panes
+
+    def _focus_pane_id(self, pane: str) -> None:
+        self.query_one(f"#{pane}").focus()
+
+    def _step_pane(self, step: int, *, wrap: bool) -> None:
+        order = self._pane_order()
+        current = self._focus_pane()
+        if current not in order:
+            self._focus_pane_id(order[0])
+            return
+        index = order.index(current) + step
+        if wrap:
+            index %= len(order)
+        elif not 0 <= index < len(order):
+            return
+        self._focus_pane_id(order[index])
+
     def action_pane_right(self) -> None:
-        self.action_focus_next()
+        self._step_pane(1, wrap=False)
 
     def action_pane_left(self) -> None:
-        self.action_focus_previous()
+        self._step_pane(-1, wrap=False)
+
+    def action_next_pane(self) -> None:
+        self._step_pane(1, wrap=True)
+
+    def action_previous_pane(self) -> None:
+        self._step_pane(-1, wrap=True)
+
+    def action_enter_pane(self) -> None:
+        """Go one level in: projects → sessions → details → reader."""
+        pane = self._focus_pane()
+        if pane == "projects":
+            self._focus_pane_id("sessions")
+        elif pane == "sessions":
+            if "detail" not in self._pane_order():
+                self._show_toast(
+                    "Details are hidden at this width", success=False, seconds=2.5
+                )
+                return
+            self._focus_pane_id("detail")
+        elif pane == "detail":
+            self._show_toast(
+                "Reader arrives in the details pane", success=False, seconds=2.5
+            )
+
+    def action_back(self) -> None:
+        """Esc: details → sessions list; filter → clear it and leave."""
+        focused = self.focused
+        if isinstance(focused, Input) and focused.id == "sessions-filter":
+            if focused.value or self._session_filter:
+                focused.value = ""
+                self._session_filter = ""
+                self._reload_sessions_table()
+            self._focus_pane_id("sessions")
+            return
+        if self._focus_pane() == "detail":
+            self._focus_pane_id("sessions")
+
+    # ---- movement inside the focused list or scroll view ---------------------
+
+    def _scroll_target(self) -> Widget | None:
+        """The focused list or scroll view that the movement keys act on."""
+        focused = self.focused
+        if isinstance(focused, DataTable) or (
+            focused is not None and focused.id == "detail"
+        ):
+            return focused
+        return None
+
+    @staticmethod
+    def _table_page_rows(table: DataTable) -> int:
+        header = table.header_height if table.show_header else 0
+        return max(1, table.scrollable_content_region.height - header)
+
+    def _move_table_cursor(self, table: DataTable, delta: int) -> None:
+        if not table.row_count:
+            return
+        row = min(max(table.cursor_row + delta, 0), table.row_count - 1)
+        table.move_cursor(row=row, animate=False)
+
+    def action_cursor_down(self) -> None:
+        target = self._scroll_target()
+        if isinstance(target, DataTable):
+            target.action_cursor_down()
+        elif target is not None:
+            target.scroll_down(animate=False)
+
+    def action_cursor_up(self) -> None:
+        target = self._scroll_target()
+        if isinstance(target, DataTable):
+            target.action_cursor_up()
+        elif target is not None:
+            target.scroll_up(animate=False)
+
+    def action_cursor_first(self) -> None:
+        target = self._scroll_target()
+        if isinstance(target, DataTable):
+            if target.row_count:
+                target.move_cursor(row=0, animate=False)
+        elif target is not None:
+            target.scroll_home(animate=False)
+
+    def action_cursor_last(self) -> None:
+        target = self._scroll_target()
+        if isinstance(target, DataTable):
+            if target.row_count:
+                target.move_cursor(row=target.row_count - 1, animate=False)
+        elif target is not None:
+            target.scroll_end(animate=False)
+
+    def action_half_page_down(self) -> None:
+        target = self._scroll_target()
+        if isinstance(target, DataTable):
+            self._move_table_cursor(target, max(1, self._table_page_rows(target) // 2))
+        elif target is not None:
+            target.scroll_relative(
+                y=max(1, target.scrollable_content_region.height // 2), animate=False
+            )
+
+    def action_half_page_up(self) -> None:
+        target = self._scroll_target()
+        if isinstance(target, DataTable):
+            self._move_table_cursor(target, -max(1, self._table_page_rows(target) // 2))
+        elif target is not None:
+            target.scroll_relative(
+                y=-max(1, target.scrollable_content_region.height // 2), animate=False
+            )
+
+    def action_page_down(self) -> None:
+        target = self._scroll_target()
+        if isinstance(target, DataTable):
+            target.action_page_down()
+        elif target is not None:
+            target.scroll_page_down(animate=False)
+
+    def action_page_up(self) -> None:
+        target = self._scroll_target()
+        if isinstance(target, DataTable):
+            target.action_page_up()
+        elif target is not None:
+            target.scroll_page_up(animate=False)
 
     def _focus_pane(self) -> str:
         """Return which main pane owns focus: projects | sessions | detail | other."""
@@ -2355,22 +2486,6 @@ class SessionManagerApp(App[None]):
             self.query_one("#sessions", DataTable).focus()
             return
         # Other screens (rename/move/settings) handle submit on their own screens.
-
-    def on_key(self, event: Key) -> None:
-        """Esc in the sessions filter clears it and returns focus to the table."""
-        if event.key != "escape":
-            return
-        focused = self.focused
-        if focused is None or getattr(focused, "id", None) != "sessions-filter":
-            return
-        event.stop()
-        event.prevent_default()
-        inp = self.query_one("#sessions-filter", Input)
-        if inp.value or self._session_filter:
-            inp.value = ""
-            self._session_filter = ""
-            self._reload_sessions_table()
-        self.query_one("#sessions", DataTable).focus()
 
     def action_show_help(self) -> None:
         self.push_screen(HelpScreen())
