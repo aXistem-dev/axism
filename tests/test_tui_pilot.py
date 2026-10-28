@@ -13,7 +13,8 @@ from textual.widgets import DataTable, Input
 
 import axism.tui.app as tui
 from axism.actions import actions_failed
-from axism.tui.app import ConfirmDeleteScreen, SessionManagerApp
+from axism.tui.app import SessionManagerApp
+from axism.tui.dialogs import ConfirmDeleteScreen
 
 
 def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, fake: bool = True) -> Path:
@@ -140,16 +141,16 @@ def test_project_delete_keep_memory_toggle(tmp_path, monkeypatch):
             body = app.screen.query_one("#confirm-body")
             before = (str(line.render()), str(body.render()))
             assert "DELETED" in before[0]
-            await pilot.press("k")
+            await pilot.press("m")
             await pilot.pause()
             after = (str(line.render()), str(body.render()))
             assert "KEPT" in after[0]
             assert "keeping memory/" in after[1]
             assert before[1] != after[1]
-            await pilot.press("k")
+            await pilot.press("m")
             await pilot.pause()
             assert "DELETED" in str(line.render())
-            await pilot.press("k")
+            await pilot.press("m")
             await pilot.pause()
             await pilot.press("y")
             await pilot.pause()
@@ -387,9 +388,9 @@ def test_keep_memory_toggle_does_not_rebuild_plans(tmp_path, monkeypatch):
             await pilot.pause()
             opened = len(calls)
             assert opened > 0
-            await pilot.press("k")
+            await pilot.press("m")
             await pilot.pause()
-            await pilot.press("k")
+            await pilot.press("m")
             await pilot.pause()
             assert len(calls) == opened
             await pilot.press("n")

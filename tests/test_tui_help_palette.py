@@ -100,7 +100,7 @@ def test_help_groups_in_order():
         assert actions, name
         assert all(a.group == name for a in actions)
     text = help_text()
-    positions = [text.index(name) for name in names]
+    positions = [text.index(f"\n{name}\n") for name in names]
     assert positions == sorted(positions)
     # The notes worth keeping from the old legend.
     assert "per pane" in text

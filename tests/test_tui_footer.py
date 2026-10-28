@@ -14,7 +14,8 @@ from textual.widgets import DataTable, Footer
 
 import axism.tui.app as tui
 from axism.tui import keys
-from axism.tui.app import ConfirmDeleteScreen, MoveTargetScreen, SessionManagerApp
+from axism.tui.app import SessionManagerApp
+from axism.tui.dialogs import ConfirmDeleteScreen, MoveTargetScreen
 from axism.tui.footer import ContextFooter
 
 SIZES = [(80, 24), (120, 40)]
@@ -240,7 +241,11 @@ def test_availability_reasons(tmp_path, monkeypatch):
 
 
 def test_every_registry_action_is_guarded():
+    # Main-screen actions; dialog keys belong to their dialog screens.
+    bound = {binding.action for binding in SessionManagerApp.BINDINGS}
     for action in keys.REGISTRY:
+        if action.id not in bound:
+            continue
         method = getattr(SessionManagerApp, f"action_{action.id}")
         source = inspect.getsource(method)
         assert f'self._guard("{action.id}"' in source, action.id

@@ -5,11 +5,9 @@ from __future__ import annotations
 import inspect
 import platform
 import sys
-from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from textual.app import App, ComposeResult
-from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Resize
 from textual.screen import ModalScreen
@@ -48,7 +46,15 @@ from axism.settings import (
     save_settings,
     settings_path,
 )
-from axism.tui.dialogs import QuitConfirmScreen
+from axism.tui.dialogs import (
+    AgentPickerScreen,
+    ConfirmDeleteScreen,
+    MoveTargetScreen,
+    QuitConfirmScreen,
+    RenameSessionScreen,
+    ThemePickerScreen,
+    VersionScreen,
+)
 from axism.tui.footer import ContextFooter
 from axism.tui.help import HelpScreen, RegistryCommands
 from axism.tui.keys import REGISTRY, bindings_for
@@ -492,11 +498,11 @@ def _memory_line(n_projects: int, keep: bool) -> str:
     if keep:
         return (
             f"Project memory is KEPT: {what} stays on disk, "
-            "everything else in the project is deleted.  [b]k[/b] to delete it too."
+            "everything else in the project is deleted.  [b]m[/b] to delete it too."
         )
     return (
         f"Project memory is DELETED: {what} is removed with the project.  "
-        "[b]k[/b] to keep it."
+        "[b]m[/b] to keep it."
     )
 
 
@@ -544,269 +550,10 @@ def _format_project_delete_confirm(
     return "\n".join(lines).rstrip(), warnings
 
 
-class ConfirmDeleteScreen(ModalScreen[bool]):
-    """Confirm a destructive action with a clear summary and y/n prompt."""
-
-    BINDINGS = [
-        Binding("y", "confirm", "Yes", show=True, priority=True),
-        Binding("n", "cancel", "No", show=True, priority=True),
-        Binding("escape", "cancel", "Cancel", show=True, priority=True),
-        Binding("k", "toggle_memory", "Keep memory", show=True, priority=True),
-    ]
-
-    def __init__(
-        self,
-        body: str,
-        *,
-        title: str,
-        warnings: list[str] | None = None,
-        confirm_verb: str = "Delete",
-        project_danger: bool = False,
-        memory_toggle: Callable[[bool], tuple[str, str]] | None = None,
-    ) -> None:
-        super().__init__()
-        # ``memory_toggle(keep)`` returns (body, memory line) for the keep state.
-        self.memory_toggle = memory_toggle
-        self.keep_memory = False
-        if memory_toggle is not None:
-            body = memory_toggle(False)[0]
-        self.body = body
-        self._title = title
-        self.warnings = warnings or []
-        self.confirm_verb = confirm_verb
-        self.project_danger = project_danger
-
-    def compose(self) -> ComposeResult:
-        warn = (
-            "\n".join(f"!  {w}" for w in self.warnings)
-            if self.warnings
-            else ""
-        )
-        title = self._title
-        if self.project_danger:
-            title = f"[b $error]⚠ {self._title}[/]"
-            if not self.warnings:
-                warn = (
-                    "!  This removes the whole project directory and linked "
-                    "session fragments."
-                )
-        dialog_classes = "-project-danger" if self.project_danger else ""
-        yield Vertical(
-            Static(title, id="confirm-title"),
-            Static(
-                warn,
-                id="confirm-warn",
-                classes="-empty" if not warn else "",
-            ),
-            Static(
-                self.memory_toggle(False)[1] if self.memory_toggle else "",
-                id="confirm-memory",
-                classes="" if self.memory_toggle else "-empty",
-            ),
-            VerticalScroll(
-                Static(self.body, id="confirm-body"),
-                id="confirm-scroll",
-            ),
-            Static(
-                (
-                    f"[b]y[/b]  {self.confirm_verb} forever     "
-                    f"[b]n[/b] / Esc  Cancel"
-                    if self.confirm_verb.lower() in {"delete"}
-                    else (
-                        f"[b]y[/b]  {self.confirm_verb}     "
-                        f"[b]n[/b] / Esc  Cancel"
-                    )
-                ),
-                id="confirm-prompt",
-            ),
-            id="confirm-dialog",
-            classes=dialog_classes,
-        )
-
-    def action_confirm(self) -> None:
-        self.dismiss(True)
-
-    def action_cancel(self) -> None:
-        self.dismiss(False)
-
-    def check_action(
-        self, action: str, parameters: tuple[object, ...]
-    ) -> bool | None:
-        if action == "toggle_memory" and self.memory_toggle is None:
-            return False
-        return True
-
-    def action_toggle_memory(self) -> None:
-        if self.memory_toggle is None:
-            return
-        self.keep_memory = not self.keep_memory
-        body, line = self.memory_toggle(self.keep_memory)
-        self.body = body
-        self.query_one("#confirm-body", Static).update(body)
-        self.query_one("#confirm-memory", Static).update(line)
-
-
-class VersionScreen(ModalScreen[None]):
-    """Detailed version / runtime info."""
-
-    BINDINGS = [
-        Binding("escape", "close", "Close", show=True, priority=True),
-        Binding("q", "close", "Close", show=True, priority=True),
-        Binding("v", "close", "Close", show=False, priority=True),
-        Binding("V", "close", "Close", show=False, priority=True),
-    ]
-
-    def __init__(self, body: str) -> None:
-        super().__init__()
-        self.body = body
-
-    def compose(self) -> ComposeResult:
-        yield Vertical(
-            Static("[b $accent]aXism version[/]", id="version-title"),
-            VerticalScroll(Static(self.body, id="version-body"), id="version-scroll"),
-            Static("[$text-muted]Esc / q / v  close[/]", id="version-hint"),
-            id="version-dialog",
-        )
-
-    def action_close(self) -> None:
-        self.dismiss(None)
-
-
-class RenameSessionScreen(ModalScreen[str | None]):
-    """Prompt for a new session title (rename or copy-as)."""
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel", show=True, priority=True),
-        Binding("enter", "apply", "Apply", show=True, priority=True),
-    ]
-
-    def __init__(
-        self,
-        current_title: str,
-        session_short: str,
-        *,
-        heading: str = "Rename session",
-        hint: str = "Enter a new title for this session",
-        allow_empty: bool = False,
-    ) -> None:
-        super().__init__()
-        self.current_title = current_title
-        self.session_short = session_short
-        self.heading = heading
-        self.hint = hint
-        self.allow_empty = allow_empty
-
-    def compose(self) -> ComposeResult:
-        yield Vertical(
-            Static(
-                f"[b]{self.heading}[/b]  {self.session_short}…",
-                id="rename-title",
-            ),
-            Static(self.hint, id="rename-hint"),
-            Input(
-                value=self.current_title,
-                placeholder="Session title",
-                id="rename-input",
-            ),
-            Static("Enter apply · Esc cancel", id="rename-footer"),
-            id="rename-dialog",
-        )
-
-    def on_mount(self) -> None:
-        inp = self.query_one("#rename-input", Input)
-        inp.focus()
-        inp.cursor_position = len(inp.value)
-
-    def action_apply(self) -> None:
-        value = self.query_one("#rename-input", Input).value.strip()
-        if value:
-            self.dismiss(value)
-        elif self.allow_empty:
-            self.dismiss(self.current_title or None)
-        else:
-            self.dismiss(None)
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        event.stop()
-        value = event.value.strip()
-        if value:
-            self.dismiss(value)
-        elif self.allow_empty:
-            self.dismiss(self.current_title or None)
-        else:
-            self.dismiss(None)
-
-
-class ThemePickerScreen(ModalScreen[str | None]):
-    """Pick a Textual theme from a scrollable list."""
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel", show=True, priority=True),
-        Binding("q", "cancel", "Cancel", show=False, priority=True),
-        Binding("enter", "apply", "Apply", show=True, priority=True),
-    ]
-
-    def __init__(self, theme_names: list[str], current: str) -> None:
-        super().__init__()
-        self.theme_names = theme_names
-        self.current = current
-
-    def compose(self) -> ComposeResult:
-        options: list[Option] = []
-        for name in self.theme_names:
-            label = f"→ {name}" if name == self.current else f"  {name}"
-            options.append(Option(label, id=name))
-        yield Vertical(
-            Static(
-                f"[b]Themes[/b]  ({len(self.theme_names)})  ·  Enter apply · Esc cancel",
-                id="theme-picker-title",
-            ),
-            OptionList(*options, id="theme-list"),
-            id="theme-picker-dialog",
-        )
-
-    def on_mount(self) -> None:
-        option_list = self.query_one("#theme-list", OptionList)
-        try:
-            idx = self.theme_names.index(self.current)
-        except ValueError:
-            idx = 0
-        if self.theme_names:
-            option_list.highlighted = idx
-        option_list.focus()
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
-
-    def action_apply(self) -> None:
-        option_list = self.query_one("#theme-list", OptionList)
-        highlighted = option_list.highlighted
-        if highlighted is None:
-            self.dismiss(None)
-            return
-        opt = option_list.get_option_at_index(highlighted)
-        self.dismiss(str(opt.id) if opt.id is not None else None)
-
-    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        event.stop()
-        if event.option.id is not None:
-            self.dismiss(str(event.option.id))
-
-
 class SettingsScreen(ModalScreen[Settings | None]):
     """Choose which backends to include, active default, and config dirs."""
 
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel", show=True, priority=True),
-        Binding("q", "cancel", "Cancel", show=False, priority=True),
-        Binding("enter", "apply", "Save", show=True, priority=True),
-        Binding("tab", "focus_path", "Path", show=False, priority=True),
-        Binding("shift+tab", "focus_list", "List", show=False, priority=True),
-        Binding("space", "toggle_enabled", "Toggle", show=False),
-    ]
+    BINDINGS = bindings_for("settings")
 
     def __init__(self, settings: Settings) -> None:
         super().__init__()
@@ -934,6 +681,9 @@ class SettingsScreen(ModalScreen[Settings | None]):
     def action_cancel(self) -> None:
         self.dismiss(None)
 
+    def action_cancel_picker(self) -> None:
+        self.dismiss(None)
+
     def action_apply(self) -> None:
         self._stash_path_input()
         pid = self._highlighted_provider() or self._settings.active_provider
@@ -951,140 +701,6 @@ class SettingsScreen(ModalScreen[Settings | None]):
                 DEFAULT_PROVIDER,
             )
         self.dismiss(Settings(active_provider=pid, providers=providers))
-
-
-class MoveTargetScreen(ModalScreen[str | None]):
-    """Pick an existing project or type a destination path."""
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel", show=True, priority=True),
-        Binding("enter", "apply", "Apply", show=True, priority=True),
-        Binding("tab", "focus_path", "Path", show=False, priority=True),
-        Binding("shift+tab", "focus_list", "List", show=False, priority=True),
-    ]
-
-    def __init__(
-        self,
-        title: str,
-        choices: list[tuple[str, str]],
-        hint: str = "",
-    ) -> None:
-        super().__init__()
-        self._title = title
-        self.choices = choices  # (cwd, label)
-        self.hint = hint or (
-            "Select an existing project, or type an absolute path below."
-        )
-
-    def compose(self) -> ComposeResult:
-        options: list[Option] = [
-            Option(label, id=cwd) for cwd, label in self.choices
-        ]
-        if not options:
-            options.append(
-                Option("(no other projects — type a path)", id="__none__")
-            )
-        yield Vertical(
-            Static(f"[b]{self._title}[/]", id="move-title"),
-            Static(self.hint, id="move-hint"),
-            OptionList(*options, id="move-list"),
-            Input(
-                placeholder="/absolute/path/to/project",
-                id="move-input",
-            ),
-            Static(
-                "↑↓ list · Tab path · Shift+Tab list · Enter apply · Esc cancel",
-                id="move-footer",
-            ),
-            id="move-dialog",
-        )
-
-    def on_mount(self) -> None:
-        self.query_one("#move-list", OptionList).focus()
-
-    def action_focus_path(self) -> None:
-        self.query_one("#move-input", Input).focus()
-
-    def action_focus_list(self) -> None:
-        self.query_one("#move-list", OptionList).focus()
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
-
-    def _dest_from_ui(self) -> str | None:
-        typed = self.query_one("#move-input", Input).value.strip()
-        if typed:
-            return typed
-        option_list = self.query_one("#move-list", OptionList)
-        highlighted = option_list.highlighted
-        if highlighted is None:
-            return None
-        opt = option_list.get_option_at_index(highlighted)
-        if opt.id is None or str(opt.id) == "__none__":
-            return None
-        return str(opt.id)
-
-    def action_apply(self) -> None:
-        dest = self._dest_from_ui()
-        self.dismiss(dest if dest else None)
-
-    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        event.stop()
-        if event.option.id is not None and str(event.option.id) != "__none__":
-            self.dismiss(str(event.option.id))
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        event.stop()
-        value = event.value.strip()
-        self.dismiss(value if value else None)
-
-
-class AgentPickerScreen(ModalScreen[str | None]):
-    """Pick a coding-agent CLI for memory-merge handoff, or save brief only."""
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel", show=True, priority=True),
-        Binding("enter", "apply", "Apply", show=True, priority=True),
-        Binding("q", "cancel", "Cancel", show=False, priority=True),
-    ]
-
-    def __init__(self, title: str, choices: list[tuple[str, str]]) -> None:
-        super().__init__()
-        self._title = title
-        self.choices = choices  # (id, label)
-
-    def compose(self) -> ComposeResult:
-        options = [Option(label, id=aid) for aid, label in self.choices]
-        yield Vertical(
-            Static(f"[b]{self._title}[/]", id="agent-picker-title"),
-            Static(
-                "Finish MEMORY.md merge with an agent, or save the brief only.",
-                id="agent-picker-hint",
-            ),
-            OptionList(*options, id="agent-list"),
-            Static("Enter select · Esc cancel", id="agent-picker-footer"),
-            id="agent-picker-dialog",
-        )
-
-    def on_mount(self) -> None:
-        self.query_one("#agent-list", OptionList).focus()
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
-
-    def action_apply(self) -> None:
-        option_list = self.query_one("#agent-list", OptionList)
-        highlighted = option_list.highlighted
-        if highlighted is None:
-            self.dismiss(None)
-            return
-        opt = option_list.get_option_at_index(highlighted)
-        self.dismiss(str(opt.id) if opt.id is not None else None)
-
-    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        event.stop()
-        if event.option.id is not None:
-            self.dismiss(str(event.option.id))
 
 
 class DetailPane(VerticalScroll):
@@ -1266,62 +882,21 @@ class SessionManagerApp(App[None]):
         background: $error 45%;
         color: $text;
     }
-    #confirm-dialog, #theme-picker-dialog, #rename-dialog, #move-dialog, #agent-picker-dialog, #version-dialog, #settings-dialog {
+    #settings-dialog {
         width: 80%;
-        height: 70%;
-        border: thick $accent;
+        height: auto;
+        max-height: 80%;
+        border: thick $primary;
         background: $surface;
         padding: 1 2;
         margin: 2 4;
     }
-    #settings-dialog {
-        height: auto;
-        max-height: 80%;
-        border: thick $primary;
-    }
-    #version-dialog {
-        height: auto;
-        max-height: 70%;
-        border: thick $primary;
-    }
-    #rename-dialog {
-        height: auto;
-        max-height: 50%;
-        border: thick $primary;
-    }
-    #move-dialog {
-        border: thick $primary;
-        layout: vertical;
-    }
-    #confirm-dialog {
-        border: thick $error;
-        layout: vertical;
-    }
-    #confirm-dialog.-project-danger {
-        border: double $error;
-        background: $error 12%;
-    }
-    #confirm-dialog.-project-danger #confirm-title {
-        background: $error 35%;
-        color: $text;
-        padding: 0 1;
-    }
-    #confirm-dialog.-project-danger #confirm-warn {
-        color: $error;
-        border: thick $error;
-        background: $error 20%;
-        text-style: bold;
-    }
-    #confirm-dialog.-project-danger #confirm-prompt {
-        background: $error 45%;
-        color: $text;
-    }
-    #confirm-title, #theme-picker-title, #rename-title, #move-title, #agent-picker-title, #version-title, #settings-title {
+    #settings-title {
         text-style: bold;
         margin-bottom: 1;
         color: $accent;
     }
-    #rename-hint, #rename-footer, #move-hint, #move-footer, #agent-picker-hint, #agent-picker-footer, #version-hint, #settings-hint, #settings-footer, #settings-path-label {
+    #settings-hint, #settings-footer, #settings-path-label {
         color: $text-muted;
         margin-bottom: 1;
     }
@@ -1332,64 +907,6 @@ class SessionManagerApp(App[None]):
     }
     #settings-path {
         margin-bottom: 1;
-    }
-    #move-list, #agent-list {
-        height: 1fr;
-        margin-bottom: 1;
-    }
-    #move-input {
-        margin-bottom: 1;
-    }
-    #rename-input {
-        margin: 1 0;
-    }
-    #confirm-title {
-        color: $error;
-        text-style: bold;
-    }
-    #confirm-warn {
-        color: $warning;
-        margin-bottom: 1;
-        padding: 0 1;
-        border: solid $warning;
-    }
-    #confirm-memory {
-        padding: 0 1;
-        margin-bottom: 1;
-        border: solid $warning;
-        text-style: bold;
-    }
-    #confirm-memory.-empty {
-        display: none;
-        height: 0;
-        margin: 0;
-        padding: 0;
-        border: none;
-    }
-    #confirm-warn.-empty {
-        display: none;
-        height: 0;
-        margin: 0;
-        padding: 0;
-        border: none;
-    }
-    #confirm-scroll {
-        height: 1fr;
-        border: solid $panel;
-        padding: 0 1;
-    }
-    #confirm-body {
-        padding: 1 0;
-    }
-    #confirm-prompt {
-        margin-top: 1;
-        padding: 1 1;
-        background: $error 20%;
-        text-style: bold;
-    }
-    #theme-list {
-        height: 1fr;
-        border: solid $primary;
     }
     """
 

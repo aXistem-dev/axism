@@ -17,6 +17,9 @@ from textual.widgets import Static
 from axism.tui.keys import KeyAction, actions_for, key_display
 
 SEPARATOR = " · "
+# Main-screen scopes: their footer also lists the app-wide keys (help, quit, …).
+# Dialogs, help and Settings list only their own keys.
+MAIN_SCOPES = frozenset({"main", "projects", "sessions", "details", "filter"})
 FILTER_ENTRIES = (("Enter", "done"), ("Esc", "clear"))
 
 KEY_STYLE = Style(color="#6ed4c4", bold=True)
@@ -26,10 +29,12 @@ DIM_STYLE = Style(dim=True)
 
 
 def footer_actions(scope: str) -> list[KeyAction]:
-    """Footer entries for ``scope`` plus the main-screen globals, by priority."""
+    """Footer entries for ``scope`` (plus the main-screen globals on the main
+    screen), by priority."""
     seen: set[str] = set()
     chosen: list[KeyAction] = []
-    for action in [*actions_for(scope), *actions_for("main")]:
+    globals_ = actions_for("main") if scope in MAIN_SCOPES else []
+    for action in [*actions_for(scope), *globals_]:
         if action.footer_priority is None or action.id in seen:
             continue
         seen.add(action.id)
@@ -51,15 +56,34 @@ class ContextFooter(Static):
     }
     """
 
-    def __init__(self, *, id: str | None = None) -> None:
+    def __init__(
+        self,
+        scope: str = "main",
+        available: Callable[[str], bool] | None = None,
+        *,
+        hidden: frozenset[str] = frozenset(),
+        id: str | None = None,
+    ) -> None:
         super().__init__("", id=id)
-        self._scope = "main"
-        self._available: Callable[[str], bool] = lambda _action_id: True
+        self._scope = scope
+        self._available: Callable[[str], bool] = available or (lambda _action_id: True)
+        self._hidden = hidden
 
-    def set_context(self, scope: str, available: Callable[[str], bool]) -> None:
-        """Show the keys for ``scope``; ``available`` says which ones to dim."""
+    def set_context(
+        self,
+        scope: str,
+        available: Callable[[str], bool],
+        *,
+        hidden: frozenset[str] = frozenset(),
+    ) -> None:
+        """Show the keys for ``scope``; ``available`` says which ones to dim.
+
+        ``hidden`` leaves out actions that do not apply at all here (the
+        delete dialog's memory key when there is no project memory).
+        """
         self._scope = scope
         self._available = available
+        self._hidden = hidden
         self.refresh()
 
     @property
@@ -68,10 +92,14 @@ class ContextFooter(Static):
 
     def render(self) -> Text:
         width = self.content_region.width or self.size.width or 80
-        return self.render_for(self._scope, self._available, width)
+        return self.render_for(self._scope, self._available, width, self._hidden)
 
     def render_for(
-        self, scope: str, available: Callable[[str], bool], width: int
+        self,
+        scope: str,
+        available: Callable[[str], bool],
+        width: int,
+        hidden: frozenset[str] = frozenset(),
     ) -> Text:
         """The footer row for ``scope``, cut after the last entry that fits ``width``."""
         if scope == "filter":
@@ -80,6 +108,7 @@ class ContextFooter(Static):
             entries = [
                 (key_display(action.keys[0]), action.label, bool(available(action.id)))
                 for action in footer_actions(scope)
+                if action.id not in hidden
             ]
         text = Text(no_wrap=True, overflow="crop", end="")
         for key, label, enabled in entries:

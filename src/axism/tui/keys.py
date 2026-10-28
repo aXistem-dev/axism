@@ -46,6 +46,7 @@ SCOPES = frozenset(
         "dialog:move",
         "dialog:agent",
         "dialog:theme",
+        "dialog:version",
         "settings",
     }
 )
@@ -64,16 +65,28 @@ class KeyAction:
     footer_priority: int | None = None
     palette: bool = True
     priority: bool = False
+    # False: the key belongs to a widget (an Input's Enter); it is listed in the
+    # help but not bound, so the widget keeps handling it.
+    bound: bool = True
 
 
 def _scopes(*names: str) -> frozenset[str]:
     return frozenset(names)
 
 
-# Panes plus the scroll views that share the movement keys.
-_MOVE = _scopes("projects", "sessions", "details", "reader", "help")
+# Panes plus the scroll views and dialog lists that share the movement keys.
+_MOVE = _scopes(
+    "projects", "sessions", "details", "reader", "help",
+    "dialog:confirm", "dialog:version", "dialog:move", "dialog:agent", "dialog:theme",
+)
 _LISTS = _scopes("projects", "sessions", "details")
 _SESSIONS = _scopes("sessions", "details")
+# Dialogs that ask a yes / no question.
+_QUESTIONS = _scopes("dialog:confirm", "dialog:quit")
+# Dialogs where Enter applies the choice or the typed text.
+_APPLY = _scopes("dialog:rename", "dialog:move", "dialog:agent", "dialog:theme", "settings")
+# Dialogs that Esc cancels.
+_CANCEL = _QUESTIONS | _APPLY
 
 REGISTRY: tuple[KeyAction, ...] = (
     # --- Everywhere: movement -------------------------------------------------
@@ -232,6 +245,77 @@ REGISTRY: tuple[KeyAction, ...] = (
         "Details: back to the sessions list · filter: clear it and leave",
         "Details & reader", _scopes("details", "filter"), footer_priority=55,
     ),
+    KeyAction(
+        "filter_done", ("enter",), "Done",
+        "Filter: done typing, go to the filtered sessions list",
+        # The filter Input's own Enter (submit); listed, not bound.
+        "Filter", _scopes("filter"), palette=False, bound=False,
+    ),
+    # --- Dialogs (keys of the dialog screens; never in the palette) -----------
+    KeyAction(
+        "confirm", ("y", "Y"), "Yes",
+        "Yes: go ahead (delete, stop, move, copy or quit)",
+        "Dialogs", _QUESTIONS, footer_priority=10, palette=False, priority=True,
+    ),
+    KeyAction(
+        "decline", ("n", "N"), "No",
+        "No: cancel the question", "Dialogs", _QUESTIONS,
+        footer_priority=20, palette=False, priority=True,
+    ),
+    KeyAction(
+        "toggle_memory", ("m", "M"), "Memory",
+        "Delete project: keep or delete its memory/ folder",
+        "Dialogs", _scopes("dialog:confirm"),
+        footer_priority=30, palette=False, priority=True,
+    ),
+    KeyAction(
+        "apply", ("enter",), "Apply",
+        "Apply: the new title, the move target, the agent, the theme or the settings",
+        "Dialogs", _APPLY, footer_priority=10, palette=False, priority=True,
+    ),
+    KeyAction(
+        "focus_path", ("tab",), "Path",
+        "Move and Settings: go to the path field",
+        "Dialogs", _scopes("dialog:move", "settings"),
+        footer_priority=30, palette=False, priority=True,
+    ),
+    KeyAction(
+        "focus_list", ("shift+tab",), "List",
+        "Move and Settings: back to the list",
+        "Dialogs", _scopes("dialog:move", "settings"), palette=False, priority=True,
+    ),
+    KeyAction(
+        "cancel", ("escape",), "Cancel",
+        "Close the dialog without changing anything",
+        "Dialogs", _CANCEL, footer_priority=90, palette=False, priority=True,
+    ),
+    KeyAction(
+        "cancel_picker", ("q", "Q"), "Cancel",
+        "Close a picker or Settings without changing anything",
+        "Dialogs", _scopes("dialog:agent", "dialog:theme", "settings"),
+        palette=False, priority=True,
+    ),
+    KeyAction(
+        "close", ("escape", "q", "Q"), "Close",
+        "Close the help or the version window",
+        "Dialogs", _scopes("help", "dialog:version"),
+        footer_priority=90, palette=False, priority=True,
+    ),
+    KeyAction(
+        "close_help", ("question_mark",), "Close",
+        "Close the help", "Dialogs", _scopes("help"), palette=False, priority=True,
+    ),
+    KeyAction(
+        "close_version", ("v", "V"), "Close",
+        "Close the version window",
+        "Dialogs", _scopes("dialog:version"), palette=False, priority=True,
+    ),
+    # --- Settings (reworked with the Settings screen) -------------------------
+    KeyAction(
+        "toggle_enabled", ("space",), "Include",
+        "Include or leave out the highlighted agent",
+        "Settings", _scopes("settings"), footer_priority=20, palette=False,
+    ),
 )
 
 _BY_ID = {action.id: action for action in REGISTRY}
@@ -282,11 +366,11 @@ def help_sections() -> list[tuple[str, list[KeyAction]]]:
 
 
 def bindings_for(*scopes: str) -> list[Binding]:
-    """One hidden Binding per key of every action in any of ``scopes``."""
+    """One hidden Binding per key of every bound action in any of ``scopes``."""
     wanted = set(scopes)
     bindings: list[Binding] = []
     for action in REGISTRY:
-        if not action.scopes & wanted:
+        if not action.bound or not action.scopes & wanted:
             continue
         for key in action.keys:
             bindings.append(

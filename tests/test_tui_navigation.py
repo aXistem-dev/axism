@@ -12,7 +12,8 @@ from conftest import write_jsonl
 from textual.widgets import DataTable, Input
 
 import axism.tui.app as tui
-from axism.tui.app import ConfirmDeleteScreen, SessionManagerApp
+from axism.tui.app import SessionManagerApp
+from axism.tui.dialogs import ConfirmDeleteScreen
 
 N_SESSIONS = 40
 SIZES = [(80, 24), (120, 40)]

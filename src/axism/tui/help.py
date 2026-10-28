@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 from rich.table import Table
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.binding import Binding
 from textual.command import DiscoveryHit, Hit, Hits, Provider
 from textual.containers import ScrollableContainer, Vertical, VerticalScroll
 from textual.screen import ModalScreen
@@ -116,13 +115,8 @@ class HelpScreen(ScrollKeys, ModalScreen[None]):
     }
     """
 
-    BINDINGS = [
-        *bindings_for("help"),
-        Binding("escape", "close", "Close", show=False, priority=True),
-        Binding("q", "close", "Close", show=False, priority=True),
-        Binding("Q", "close", "Close", show=False, priority=True),
-        Binding("question_mark", "close", "Close", show=False, priority=True),
-    ]
+    # Movement keys plus Esc / q / ? to close, all from the registry.
+    BINDINGS = bindings_for("help")
 
     AUTO_FOCUS = "#help-scroll"
 
@@ -147,6 +141,9 @@ class HelpScreen(ScrollKeys, ModalScreen[None]):
         return self.query_one("#help-scroll", VerticalScroll)
 
     def action_close(self) -> None:
+        self.dismiss(None)
+
+    def action_close_help(self) -> None:
         self.dismiss(None)
 
 
