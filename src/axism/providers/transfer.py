@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import tempfile
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -29,6 +31,9 @@ from axism.providers.cursor_store.paths import (
     projects_dir as cursor_projects_dir,
 )
 from axism.providers.hermes_store import ops as hermes_ops
+from axism.providers.opencode_store import discover as oc_discover
+from axism.providers.opencode_store import ops as oc_ops
+from axism.providers.opencode_store.paths import short_id as oc_short_id
 
 USER_QUERY_RE = re.compile(
     r"<user_query>\s*(.*?)\s*</user_query>", re.DOTALL | re.IGNORECASE
@@ -232,10 +237,46 @@ def export_hermes_session(
         )
 
 
+def export_opencode_session(
+    provider: SessionProvider, session: SessionMeta
+) -> CanonicalTranscript:
+    """Read turns straight from the OpenCode database (read-only, no server)."""
+    root = provider.config_root()
+    row = (
+        oc_discover.session_row(root, session.session_id)
+        if oc_discover.layout_status(root) == "ok"
+        else None
+    )
+    if row is None:
+        return CanonicalTranscript(
+            title=session.display_title,
+            cwd=session.cwd,
+            source_provider="opencode",
+            source_session_id=session.session_id,
+            turns=[],
+            export_error=(
+                "OpenCode export failed: cannot read session "
+                f"{oc_short_id(session.session_id)} from the database"
+            ),
+        )
+    turns: list[Turn] = []
+    for role, text in oc_discover.transcript_turns(root, session.session_id):
+        _append_turn(turns, role, text)
+    return CanonicalTranscript(
+        title=(row.title or "").strip() or session.display_title,
+        cwd=row.directory or session.cwd,
+        source_provider="opencode",
+        source_session_id=session.session_id,
+        turns=turns,
+    )
+
+
 def export_session(
     provider: SessionProvider, session: SessionMeta
 ) -> CanonicalTranscript:
     name = provider.name
+    if name == "opencode":
+        return export_opencode_session(provider, session)
     if name == "hermes":
         return export_hermes_session(provider, session)
     path = session.transcript_path
@@ -422,6 +463,102 @@ def _write_temp_claude_for_hermes(
     return flat
 
 
+def _opencode_transfer_payload(
+    canonical: CanonicalTranscript, dest_cwd: str, session_id: str
+) -> dict:
+    """Transfer file in the shape ``opencode session export`` prints."""
+    now = int(time.time() * 1000)
+    messages: list[dict] = []
+    for i, turn in enumerate(canonical.turns):
+        stamp = now + i
+        msg_id = f"msg_{stamp * 0x1000 + i:012x}{uuid.uuid4().hex[:14]}"
+        if turn.role == "user":
+            messages.append(
+                {
+                    "id": msg_id,
+                    "time": {"created": stamp},
+                    "text": turn.content,
+                    "type": "user",
+                }
+            )
+        else:
+            messages.append(
+                {
+                    "id": msg_id,
+                    "time": {"created": stamp, "completed": stamp},
+                    "type": "assistant",
+                    "agent": "build",
+                    "model": {"id": "imported", "providerID": "imported"},
+                    "content": [{"type": "text", "text": turn.content}],
+                }
+            )
+    last = now + max(len(messages) - 1, 0)
+    return {
+        "info": {
+            "id": session_id,
+            "projectID": "0" * 40,
+            "cost": 0,
+            "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {"read": 0, "write": 0},
+            },
+            "time": {"created": now, "updated": last},
+            "title": canonical.title.strip()[:200] or "Imported session",
+            "location": {"directory": dest_cwd},
+        },
+        "messages": messages,
+    }
+
+
+def _import_to_opencode(
+    dest: SessionProvider,
+    canonical: CanonicalTranscript,
+    dest_cwd: str,
+    actions: list[str],
+) -> TransferResult:
+    root = dest.config_root()
+    new_id = oc_ops.new_session_id()
+    payload = _opencode_transfer_payload(canonical, dest_cwd, new_id)
+    tmp = Path(tempfile.mkdtemp(prefix="axism-oc-import-"))
+    try:
+        path = tmp / "transfer.json"
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        ok, msg, imported = oc_ops.import_session(
+            root, path, dest_cwd, session_id=new_id
+        )
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    if not ok:
+        return TransferResult(
+            ok=False,
+            message=msg,
+            actions=actions,
+            dest_provider=dest.name,
+            dest_cwd=dest_cwd,
+        )
+    actions.append(msg)
+    title = canonical.title.strip()[:200]
+    row = oc_discover.session_row(root, imported)
+    if row is None:
+        actions.append("title note: rename skipped (imported session not in database yet)")
+    elif title and (row.title or "") != title:
+        r_ok, r_msg = oc_ops.rename_session(root, row, title)
+        actions.append(r_msg if r_ok else f"title note: {r_msg}")
+    return TransferResult(
+        ok=True,
+        message=(
+            f"Copied to OpenCode as {oc_short_id(imported)} under {dest_cwd} "
+            "(text turns only)"
+        ),
+        actions=actions,
+        new_session_id=imported,
+        dest_provider=dest.name,
+        dest_cwd=dest_cwd,
+    )
+
+
 def import_to_provider(
     dest: SessionProvider,
     canonical: CanonicalTranscript,
@@ -477,6 +614,8 @@ def import_to_provider(
                 dest_provider=dest.name,
                 dest_cwd=dest_cwd,
             )
+        if dest.name == "opencode":
+            return _import_to_opencode(dest, canonical, dest_cwd, actions)
         if dest.name == "hermes":
             # Prefer native Claude file import when source path is Claude JSONL.
             src_path = _write_temp_claude_for_hermes(canonical, dest_cwd)
@@ -488,8 +627,6 @@ def import_to_provider(
                     timeout=120.0,
                 )
             finally:
-                import shutil
-
                 shutil.rmtree(tmp_root, ignore_errors=True)
             if rc != 0:
                 return TransferResult(
@@ -589,6 +726,7 @@ def transfer_session(
         and title
         and title.strip()
         and dest.capabilities.rename
+        and dest.name != "opencode"
     ):
         # Reinforce title for backends that store it outside the transcript seed.
         ok, msg = dest.rename(result.new_session_id, title.strip())

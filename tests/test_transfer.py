@@ -202,3 +202,215 @@ def test_export_reads_custom_title_key(tmp_path: Path):
     path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
     sess = _session(path, sid, "/home/alice/src/demo", "claude_code")
     assert export_claude_jsonl(path, session=sess).title == "From customTitle"
+
+
+# -- OpenCode ---------------------------------------------------------------
+
+OC_ID = "ses_a1AliceDemo0001"
+
+
+def _oc_root(tmp_path: Path) -> Path:
+    from tests.opencode_fixtures import make_opencode_db
+
+    root = tmp_path / "data" / "opencode"
+    make_opencode_db(
+        root,
+        sessions=[
+            {"id": OC_ID, "project_id": "p1", "parent_id": None,
+             "directory": "/home/alice/one", "title": "Oc demo",
+             "time_created": 1_000_000, "time_updated": 5_000_000},
+        ],
+        projects=[{"id": "p1", "worktree": "/home/alice/one"}],
+        messages=[
+            {"session_id": OC_ID, "type": "user", "seq": 1,
+             "data": {"text": "hello oc"}},
+            {"session_id": OC_ID, "type": "assistant", "seq": 2,
+             "data": {"content": [{"type": "text", "text": "hi alice"}]}},
+        ],
+    )
+    return root
+
+
+def _oc_meta(root: Path) -> SessionMeta:
+    return _session(root / "opencode.db", OC_ID, "/home/alice/one", "opencode")
+
+
+def test_export_opencode_turns_and_title(tmp_path: Path):
+    from axism.providers.transfer import export_session
+
+    root = _oc_root(tmp_path)
+    prov = get_provider("opencode", config_dir=root)
+    canonical = export_session(prov, _oc_meta(root))
+    assert canonical.export_error == ""
+    assert canonical.title == "Oc demo"
+    assert canonical.source_provider == "opencode"
+    assert [(t.role, t.content) for t in canonical.turns] == [
+        ("user", "hello oc"),
+        ("assistant", "hi alice"),
+    ]
+
+
+def test_export_opencode_unreadable_db_sets_error(tmp_path: Path):
+    from axism.providers.transfer import export_session
+
+    root = tmp_path / "data" / "opencode"
+    root.mkdir(parents=True)
+    (root / "opencode.db").write_bytes(b"not a database")
+    prov = get_provider("opencode", config_dir=root)
+    canonical = export_session(prov, _oc_meta(root))
+    assert canonical.export_error
+    dest = get_provider("claude_code", config_dir=tmp_path / "claude")
+    result = transfer_session(prov, dest, _oc_meta(root), "/home/alice/x")
+    assert result.ok is False
+    assert result.message == canonical.export_error
+
+
+def _oc_dest(tmp_path: Path):
+    root = tmp_path / "ocdest" / "opencode"
+    root.mkdir(parents=True)
+    return get_provider("opencode", config_dir=root)
+
+
+def _canon(title: str = "Demo cross"):
+    from axism.providers.transfer import CanonicalTranscript, Turn
+
+    return CanonicalTranscript(
+        title=title,
+        cwd="/home/alice/src/demo",
+        source_provider="claude_code",
+        source_session_id="s1",
+        turns=[Turn("user", "Hello"), Turn("assistant", "Hi there")],
+    )
+
+
+def test_import_opencode_writes_transfer_json_and_reports_new_id(
+    tmp_path: Path, monkeypatch
+):
+    from axism.providers.opencode_store import ops
+
+    seen: dict = {}
+
+    def fake_import(root, transfer_file, directory, *, session_id):
+        seen["data"] = json.loads(Path(transfer_file).read_text(encoding="utf-8"))
+        seen["file"] = Path(transfer_file)
+        seen["dir"] = directory
+        seen["id"] = session_id
+        return True, "imported", session_id
+
+    monkeypatch.setattr(ops, "import_session", fake_import)
+    monkeypatch.setattr(ops, "rename_session", lambda *a, **k: (True, "renamed"))
+    dest = _oc_dest(tmp_path)
+    result = import_to_provider(dest, _canon(), "/home/alice/src/other")
+
+    assert result.ok, result.message
+    assert result.new_session_id == seen["id"]
+    assert result.new_session_id.startswith("ses_")
+    assert result.dest_provider == "opencode"
+    assert result.dest_cwd == "/home/alice/src/other"
+    assert seen["dir"] == "/home/alice/src/other"
+    data = seen["data"]
+    assert data["info"]["id"] == seen["id"]
+    assert data["info"]["title"] == "Demo cross"
+    assert data["info"]["location"] == {"directory": "/home/alice/src/other"}
+    msgs = data["messages"]
+    assert [m["type"] for m in msgs] == ["user", "assistant"]
+    assert msgs[0]["text"] == "Hello"
+    assert msgs[1]["content"] == [{"type": "text", "text": "Hi there"}]
+    assert all(m["id"].startswith("msg_") for m in msgs)
+    assert msgs[0]["id"] < msgs[1]["id"]
+    assert msgs[1]["agent"] and msgs[1]["model"]["id"] and msgs[1]["model"]["providerID"]
+    assert "completed" in msgs[1]["time"]
+    assert not seen["file"].exists()
+
+
+def test_import_opencode_failure_is_not_ok(tmp_path: Path, monkeypatch):
+    from axism.providers.opencode_store import ops
+
+    files: list[Path] = []
+
+    def fake_import(root, transfer_file, directory, *, session_id):
+        files.append(Path(transfer_file))
+        return False, "error: import into OpenCode failed: boom", ""
+
+    monkeypatch.setattr(ops, "import_session", fake_import)
+    result = import_to_provider(_oc_dest(tmp_path), _canon(), "/home/alice/src/other")
+    assert result.ok is False
+    assert "boom" in result.message
+    assert result.new_session_id == ""
+    assert not files[0].exists()
+
+
+def test_import_opencode_removes_temp_file_on_exception(tmp_path: Path, monkeypatch):
+    from axism.providers.opencode_store import ops
+
+    files: list[Path] = []
+
+    def fake_import(root, transfer_file, directory, *, session_id):
+        files.append(Path(transfer_file))
+        raise OSError("disk gone")
+
+    monkeypatch.setattr(ops, "import_session", fake_import)
+    result = import_to_provider(_oc_dest(tmp_path), _canon(), "/home/alice/src/other")
+    assert result.ok is False
+    assert "disk gone" in result.message
+    assert not files[0].exists()
+
+
+def test_import_opencode_renames_when_title_lost(tmp_path: Path, monkeypatch):
+    from axism.providers.opencode_store import discover as oc_discover
+    from axism.providers.opencode_store import ops
+    from axism.providers.opencode_store.discover import SessionRow
+
+    monkeypatch.setattr(
+        ops, "import_session", lambda r, f, d, *, session_id: (True, "ok", session_id)
+    )
+    monkeypatch.setattr(
+        oc_discover,
+        "session_row",
+        lambda root, sid: SessionRow(
+            id=sid, project_id="p", parent_id=None, directory="/x",
+            title="Other title", time_created=1, time_updated=1,
+        ),
+    )
+    calls: list[str] = []
+    monkeypatch.setattr(
+        ops, "rename_session", lambda root, row, title: (calls.append(title), (True, "r"))[1]
+    )
+    result = import_to_provider(_oc_dest(tmp_path), _canon(), "/home/alice/src/other")
+    assert result.ok
+    assert calls == ["Demo cross"]
+
+
+def test_import_opencode_rename_skipped_when_row_missing(tmp_path: Path, monkeypatch):
+    from axism.providers.opencode_store import ops
+
+    monkeypatch.setattr(
+        ops, "import_session", lambda r, f, d, *, session_id: (True, "ok", session_id)
+    )
+    result = import_to_provider(_oc_dest(tmp_path), _canon(), "/home/alice/src/other")
+    assert result.ok
+    assert any("rename skipped" in a for a in result.actions)
+
+
+def test_import_opencode_custom_root_refused(tmp_path: Path):
+    root = tmp_path / "custom"
+    root.mkdir()
+    dest = get_provider("opencode", config_dir=root)
+    result = import_to_provider(dest, _canon(), "/home/alice/src/other")
+    assert result.ok is False
+    assert result.message.startswith("refused: ")
+
+
+def test_roundtrip_claude_to_opencode_dry_run(tmp_path: Path):
+    sid = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+    path = tmp_path / "src.jsonl"
+    _sample_claude_jsonl(path, sid, "/home/alice/src/demo")
+    sess = _session(path, sid, "/home/alice/src/demo", "claude_code")
+    claude_home = tmp_path / "claude"
+    claude_home.mkdir()
+    source = get_provider("claude_code", config_dir=claude_home)
+    dest = _oc_dest(tmp_path)
+    result = transfer_session(source, dest, sess, "/home/alice/src/other", dry_run=True)
+    assert result.ok
+    assert "dry-run" in result.message.lower()
+    assert not list((tmp_path / "ocdest").rglob("*.db"))
