@@ -15,7 +15,7 @@ from textual.screen import ModalScreen
 from textual.theme import Theme
 from textual.timer import Timer
 from textual.widget import Widget
-from textual.widgets import DataTable, Footer, Input, OptionList, Static
+from textual.widgets import DataTable, Input, OptionList, Static
 from textual.widgets._header import HeaderClock, HeaderClockSpace
 from textual.widgets.option_list import Option
 
@@ -47,6 +47,7 @@ from axism.settings import (
     save_settings,
     settings_path,
 )
+from axism.tui.footer import ContextFooter
 from axism.tui.keys import REGISTRY, bindings_for
 
 # Registry scopes whose keys are bound on the main screen.
@@ -1467,28 +1468,6 @@ class SessionManagerApp(App[None]):
     #help-dialog {
         border: thick $primary;
     }
-    /* height:1 — no borders; they zero the content row and hide keybinds */
-    Footer {
-        height: 1;
-        background: #1a1f2a;
-        color: #e8eef5;
-    }
-    FooterKey {
-        color: #e8eef5;
-        background: #1a1f2a;
-        text-opacity: 100%;
-        .footer-key--key {
-            color: #6ed4c4;
-            text-style: bold;
-            background: #1a1f2a;
-            text-opacity: 100%;
-        }
-        .footer-key--description {
-            color: #e8eef5;
-            background: #1a1f2a;
-            text-opacity: 100%;
-        }
-    }
     """
 
     # Every main-screen key comes from the key registry (tui/keys.py).
@@ -1533,7 +1512,7 @@ class SessionManagerApp(App[None]):
             yield DetailPane("Select a session  ·  ? help", id="detail")
         yield Static("", id="status")
         yield Static("", id="toast")
-        yield Footer(compact=True, show_command_palette=False)
+        yield ContextFooter(id="footer")
 
     def on_mount(self) -> None:
         self.register_theme(AXISM_THEME)
@@ -1678,7 +1657,12 @@ class SessionManagerApp(App[None]):
     def check_action(
         self, action: str, parameters: tuple[object, ...]
     ) -> bool | None:
-        """Hide/disable keys that cannot run in the current pane or state."""
+        """Decide whether a key reaches its action at all.
+
+        Registry keys always fire on the main screen: an action that cannot
+        run says why (see ``action_available`` and ``_guard``). Dialogs keep
+        their own keys, and a focused Input keeps its keys (Inputs win).
+        """
         if len(self.screen_stack) > 1:
             return False
         if (
@@ -1688,53 +1672,104 @@ class SessionManagerApp(App[None]):
         ):
             # Inputs win: the key goes to the text field (cursor, Home/End, Del, …).
             return False
-        pane = self._focus_pane()
-        if action == "toggle_select" and pane == "detail":
-            return False
-        if action == "toggle_select" and isinstance(self.focused, Input):
-            return False
-        if action in {"focus_session_filter", "cycle_session_sort"}:
-            if pane not in {"sessions", "detail"} and action == "cycle_session_sort":
-                return False
-            if action == "cycle_session_sort" and not self.selected_project:
-                return False
-            if (
-                action == "focus_session_filter"
-                and isinstance(self.focused, Input)
-                and self.focused.id != "sessions-filter"
-            ):
-                return False
-        if action == "resume_session":
-            if pane == "projects" or not self.selected_session:
-                return False
-        if action == "rename_session":
-            if pane == "projects" or not self.selected_session:
-                return False
-        if action == "move_items":
-            if pane == "projects":
-                if not self._target_projects():
-                    return False
-            elif pane in {"sessions", "detail"}:
-                if not self._target_sessions_for_move():
-                    return False
-            else:
-                return False
-        if action == "stop_sessions":
-            if pane == "projects":
-                return False
-            candidates = self._target_sessions_for_stop()
-            if not self._stoppable_among(candidates):
-                return False
-        if action == "delete_items":
-            if pane == "projects":
-                if not self._target_projects():
-                    return False
-            elif pane in {"sessions", "detail"}:
-                if not self._target_sessions_for_delete():
-                    return False
-            else:
-                return False
         return True
+
+    def action_available(self, action_id: str) -> tuple[bool, str]:
+        """Whether ``action_id`` can run now, and if not, a short reason why."""
+        pane = self._focus_pane()
+        in_filter = (
+            isinstance(self.focused, Input) and self.focused.id == "sessions-filter"
+        )
+        on_sessions = pane in {"sessions", "detail"}
+        if action_id == "toggle_select":
+            if pane not in {"projects", "sessions"} or in_filter:
+                return False, "Mark works in the Projects and Sessions panes"
+            if pane == "projects" and not self.selected_project:
+                return False, "Select a project first"
+            if pane == "sessions" and not self.selected_session:
+                return False, "Select a session first"
+        elif action_id == "select_all":
+            if pane == "projects":
+                if not self.projects:
+                    return False, "No projects to mark"
+            elif on_sessions:
+                if not self.selected_project:
+                    return False, "Select a project first"
+            else:
+                return False, "Mark all works in the Projects and Sessions panes"
+        elif action_id == "clear_select":
+            if not (self.selected_project_slugs or self.selected_session_ids):
+                return False, "Nothing marked"
+        elif action_id == "cycle_session_sort":
+            if not on_sessions:
+                return False, "Sort works in the Sessions pane"
+            if not self.selected_project:
+                return False, "Select a project first"
+        elif action_id in {"resume_session", "rename_session"}:
+            verb = "Open" if action_id == "resume_session" else "Rename"
+            if not on_sessions:
+                return False, f"{verb} works in the Sessions pane"
+            session = self.selected_session
+            if not session:
+                return False, "Select a session first"
+            provider = self._provider_for_session(session)
+            if action_id == "resume_session" and not provider.capabilities.resume:
+                return False, f"{provider.label} cannot open sessions"
+            if action_id == "rename_session" and not provider.capabilities.rename:
+                return False, f"{provider.label} cannot rename sessions"
+        elif action_id == "stop_sessions":
+            if not on_sessions:
+                return False, "Stop works in the Sessions pane"
+            if not self._stoppable_among(self._target_sessions_for_stop()):
+                return False, "Nothing to stop"
+        elif action_id in {"move_items", "delete_items"}:
+            verb = "move" if action_id == "move_items" else "delete"
+            if pane == "projects":
+                targets: list[object] = list(self._target_projects())
+            elif on_sessions:
+                targets = list(
+                    self._target_sessions_for_move()
+                    if action_id == "move_items"
+                    else self._target_sessions_for_delete()
+                )
+            else:
+                return False, f"{verb.capitalize()} works in the Projects and Sessions panes"
+            if not targets:
+                return False, f"Nothing marked to {verb}"
+        elif action_id == "enter_pane":
+            if pane == "sessions" and "detail" not in self._pane_order():
+                return False, "Details are hidden at this width"
+            if pane == "detail":
+                return False, "Reader arrives in the details pane"
+        elif action_id == "back":
+            if not (in_filter or pane == "detail"):
+                return False, "Esc goes back from the details pane or the filter"
+        return True, ""
+
+    def _guard(self, action_id: str) -> bool:
+        """True when ``action_id`` may run; otherwise show the reason and say False."""
+        enabled, reason = self.action_available(action_id)
+        if not enabled:
+            self._show_toast(reason, success=False, seconds=2.5)
+        return enabled
+
+    def _footer_scope(self) -> str:
+        """Registry scope for the footer: the focused pane, or filter mode."""
+        focused = self.focused
+        if isinstance(focused, Input) and focused.id == "sessions-filter":
+            return "filter"
+        return {"projects": "projects", "sessions": "sessions", "detail": "details"}.get(
+            self._focus_pane(), "main"
+        )
+
+    def _refresh_footer(self) -> None:
+        try:
+            footer = self.query_one(ContextFooter)
+        except Exception:
+            return
+        footer.set_context(
+            self._footer_scope(), lambda action_id: self.action_available(action_id)[0]
+        )
 
     # ---- pane focus ---------------------------------------------------------
 
@@ -1762,36 +1797,39 @@ class SessionManagerApp(App[None]):
         self._focus_pane_id(order[index])
 
     def action_pane_right(self) -> None:
+        if not self._guard("pane_right"):
+            return
         self._step_pane(1, wrap=False)
 
     def action_pane_left(self) -> None:
+        if not self._guard("pane_left"):
+            return
         self._step_pane(-1, wrap=False)
 
     def action_next_pane(self) -> None:
+        if not self._guard("next_pane"):
+            return
         self._step_pane(1, wrap=True)
 
     def action_previous_pane(self) -> None:
+        if not self._guard("previous_pane"):
+            return
         self._step_pane(-1, wrap=True)
 
     def action_enter_pane(self) -> None:
         """Go one level in: projects → sessions → details → reader."""
+        if not self._guard("enter_pane"):
+            return
         pane = self._focus_pane()
         if pane == "projects":
             self._focus_pane_id("sessions")
         elif pane == "sessions":
-            if "detail" not in self._pane_order():
-                self._show_toast(
-                    "Details are hidden at this width", success=False, seconds=2.5
-                )
-                return
             self._focus_pane_id("detail")
-        elif pane == "detail":
-            self._show_toast(
-                "Reader arrives in the details pane", success=False, seconds=2.5
-            )
 
     def action_back(self) -> None:
         """Esc: details → sessions list; filter → clear it and leave."""
+        if not self._guard("back"):
+            return
         focused = self.focused
         if isinstance(focused, Input) and focused.id == "sessions-filter":
             if focused.value or self._session_filter:
@@ -1800,8 +1838,7 @@ class SessionManagerApp(App[None]):
                 self._reload_sessions_table()
             self._focus_pane_id("sessions")
             return
-        if self._focus_pane() == "detail":
-            self._focus_pane_id("sessions")
+        self._focus_pane_id("sessions")
 
     # ---- movement inside the focused list or scroll view ---------------------
 
@@ -1826,6 +1863,8 @@ class SessionManagerApp(App[None]):
         table.move_cursor(row=row, animate=False)
 
     def action_cursor_down(self) -> None:
+        if not self._guard("cursor_down"):
+            return
         target = self._scroll_target()
         if isinstance(target, DataTable):
             target.action_cursor_down()
@@ -1833,6 +1872,8 @@ class SessionManagerApp(App[None]):
             target.scroll_down(animate=False)
 
     def action_cursor_up(self) -> None:
+        if not self._guard("cursor_up"):
+            return
         target = self._scroll_target()
         if isinstance(target, DataTable):
             target.action_cursor_up()
@@ -1840,6 +1881,8 @@ class SessionManagerApp(App[None]):
             target.scroll_up(animate=False)
 
     def action_cursor_first(self) -> None:
+        if not self._guard("cursor_first"):
+            return
         target = self._scroll_target()
         if isinstance(target, DataTable):
             if target.row_count:
@@ -1848,6 +1891,8 @@ class SessionManagerApp(App[None]):
             target.scroll_home(animate=False)
 
     def action_cursor_last(self) -> None:
+        if not self._guard("cursor_last"):
+            return
         target = self._scroll_target()
         if isinstance(target, DataTable):
             if target.row_count:
@@ -1856,6 +1901,8 @@ class SessionManagerApp(App[None]):
             target.scroll_end(animate=False)
 
     def action_half_page_down(self) -> None:
+        if not self._guard("half_page_down"):
+            return
         target = self._scroll_target()
         if isinstance(target, DataTable):
             self._move_table_cursor(target, max(1, self._table_page_rows(target) // 2))
@@ -1865,6 +1912,8 @@ class SessionManagerApp(App[None]):
             )
 
     def action_half_page_up(self) -> None:
+        if not self._guard("half_page_up"):
+            return
         target = self._scroll_target()
         if isinstance(target, DataTable):
             self._move_table_cursor(target, -max(1, self._table_page_rows(target) // 2))
@@ -1874,6 +1923,8 @@ class SessionManagerApp(App[None]):
             )
 
     def action_page_down(self) -> None:
+        if not self._guard("page_down"):
+            return
         target = self._scroll_target()
         if isinstance(target, DataTable):
             target.action_page_down()
@@ -1881,6 +1932,8 @@ class SessionManagerApp(App[None]):
             target.scroll_page_down(animate=False)
 
     def action_page_up(self) -> None:
+        if not self._guard("page_up"):
+            return
         target = self._scroll_target()
         if isinstance(target, DataTable):
             target.action_page_up()
@@ -2035,6 +2088,8 @@ class SessionManagerApp(App[None]):
         return next(iter(names))
 
     def action_refresh(self) -> None:
+        if not self._guard("refresh"):
+            return
         self.projects = federate_discover(self.providers)
         self.live = federate_merge_live(self.providers, use_cli=True)
         known_sessions = {s.key for p in self.projects for s in p.sessions}
@@ -2065,6 +2120,7 @@ class SessionManagerApp(App[None]):
             bits.append(extra)
         self.query_one("#status", Static).update("  ·  ".join(bits))
         self.refresh_bindings()
+        self._refresh_footer()
 
     def on_descendant_focus(self, _event: object) -> None:
         self._sync_pane_focus_classes()
@@ -2405,15 +2461,10 @@ class SessionManagerApp(App[None]):
                     return
 
     def action_toggle_select(self) -> None:
-        pane = self._focus_pane()
-        if pane == "detail":
-            self._show_toast("Space has no effect in detail pane", success=False, seconds=2.5)
+        if not self._guard("toggle_select"):
             return
-        if pane == "projects":
-            p = self.selected_project
-            if not p:
-                self._show_toast("No project focused", success=False, seconds=2.5)
-                return
+        p = self.selected_project
+        if self._focus_pane() == "projects" and p is not None:
             if p.key in self.selected_project_slugs:
                 self.selected_project_slugs.discard(p.key)
             else:
@@ -2421,8 +2472,7 @@ class SessionManagerApp(App[None]):
             self._update_project_marks()
             return
         s = self.selected_session
-        if not s:
-            self._show_toast("No session focused", success=False, seconds=2.5)
+        if s is None:
             return
         if s.key in self.selected_session_ids:
             self.selected_session_ids.discard(s.key)
@@ -2431,6 +2481,8 @@ class SessionManagerApp(App[None]):
         self._update_session_marks()
 
     def action_select_all(self) -> None:
+        if not self._guard("select_all"):
+            return
         pane = self._focus_pane()
         if pane == "projects":
             for p in self.projects:
@@ -2438,14 +2490,14 @@ class SessionManagerApp(App[None]):
             self._update_project_marks()
             return
         if pane in {"sessions", "detail"}:
-            if not self.selected_project:
-                return
             for s in self._visible_sessions():
                 self.selected_session_ids.add(s.key)
             self._update_session_marks()
 
     def action_clear_select(self) -> None:
         """Clear project and session marks everywhere."""
+        if not self._guard("clear_select"):
+            return
         n_proj = len(self.selected_project_slugs)
         n_sess = len(self.selected_session_ids)
         self.selected_project_slugs.clear()
@@ -2453,25 +2505,23 @@ class SessionManagerApp(App[None]):
         self._update_project_marks()
         self._update_session_marks()
         self._refresh_status()
-        if n_proj or n_sess:
-            self._show_toast(
-                f"Cleared selections (proj={n_proj} sess={n_sess})",
-                success=True,
-                seconds=2.5,
-            )
-        else:
-            self._show_toast("Nothing selected", success=False, seconds=2)
+        self._show_toast(
+            f"Cleared selections (proj={n_proj} sess={n_sess})",
+            success=True,
+            seconds=2.5,
+        )
 
     def action_focus_session_filter(self) -> None:
         """Focus the sessions filter box."""
+        if not self._guard("focus_session_filter"):
+            return
         inp = self.query_one("#sessions-filter", Input)
         inp.focus()
         inp.cursor_position = len(inp.value)
 
     def action_cycle_session_sort(self) -> None:
         """Cycle sessions sort mode."""
-        if not self.selected_project:
-            self._show_toast("Select a project first", success=False, seconds=2)
+        if not self._guard("cycle_session_sort"):
             return
         ids = [m[0] for m in SESSION_SORT_MODES]
         try:
@@ -2503,11 +2553,20 @@ class SessionManagerApp(App[None]):
             return
         # Other screens (rename/move/settings) handle submit on their own screens.
 
+    async def action_quit(self) -> None:
+        if not self._guard("quit"):
+            return
+        self.exit()
+
     def action_show_help(self) -> None:
+        if not self._guard("show_help"):
+            return
         self.push_screen(HelpScreen())
 
     def action_show_settings(self) -> None:
         """Open provider / config-dir settings."""
+        if not self._guard("show_settings"):
+            return
 
         def _after(updated: Settings | None) -> None:
             if updated is None:
@@ -2543,6 +2602,8 @@ class SessionManagerApp(App[None]):
 
     def action_show_version(self) -> None:
         """Show version and runtime details."""
+        if not self._guard("show_version"):
+            return
         try:
             import textual
 
@@ -2582,16 +2643,9 @@ class SessionManagerApp(App[None]):
 
     def action_stop_sessions(self) -> None:
         """Stop background sessions (same as typing ``/stop`` while attached)."""
-        candidates = self._target_sessions_for_stop()
-        targets = self._stoppable_among(candidates)
-        if not targets:
-            self._show_toast(
-                "Nothing to stop (need a live background session)",
-                success=False,
-                seconds=3,
-            )
-            self._refresh_status()
+        if not self._guard("stop_sessions"):
             return
+        targets = self._stoppable_among(self._target_sessions_for_stop())
 
         warnings = [
             "Stops each session via its agent tool.",
@@ -2661,19 +2715,12 @@ class SessionManagerApp(App[None]):
 
     def action_resume_session(self) -> None:
         """Exit axism and hand off to the provider's agent CLI."""
-        if self._focus_pane() == "projects":
-            self._show_toast("Focus a session to open", success=False, seconds=2.5)
+        if not self._guard("resume_session"):
             return
         s = self.selected_session
-        if not s:
-            self._show_toast("No session focused to open", success=False)
+        if s is None:
             return
         provider = self._provider_for_session(s)
-        if not provider.capabilities.resume:
-            self._show_toast(
-                f"{provider.label} cannot open sessions", success=False, seconds=4
-            )
-            return
         live = live_for_session(self.live, s)
         self.exit(
             {
@@ -2690,21 +2737,12 @@ class SessionManagerApp(App[None]):
 
     def action_rename_session(self) -> None:
         """Rename the focused session with its owning backend's title mechanism."""
-        if self._focus_pane() == "projects":
-            self._show_toast("Focus a session to rename", success=False, seconds=2.5)
+        if not self._guard("rename_session"):
             return
         s = self.selected_session
-        if not s:
-            self._show_toast("No session focused to rename", success=False)
+        if s is None:
             return
         provider = self._provider_for_session(s)
-        if not provider.capabilities.rename:
-            self._show_toast(
-                f"{provider.label} cannot rename sessions",
-                success=False,
-                seconds=4,
-            )
-            return
         current = s.display_title.replace("\n", " ").strip()
 
         def _after(new_title: str | None) -> None:
@@ -2796,6 +2834,8 @@ class SessionManagerApp(App[None]):
 
     def action_move_items(self) -> None:
         """Move focused/marked project(s) or session(s) within the same agent tool."""
+        if not self._guard("move_items"):
+            return
         pane = self._focus_pane()
 
         if pane == "projects":
@@ -3099,6 +3139,8 @@ class SessionManagerApp(App[None]):
         _pick(force=False)
 
     def action_pick_theme(self) -> None:
+        if not self._guard("pick_theme"):
+            return
         names = self._theme_names or sorted(self.available_themes.keys())
         if not names:
             self._show_toast("No themes available", success=False)
@@ -3129,6 +3171,8 @@ class SessionManagerApp(App[None]):
         self._show_toast(f"Theme: {new_name}", success=True, seconds=2.5)
 
     def action_next_theme(self) -> None:
+        if not self._guard("next_theme"):
+            return
         self._cycle_theme(1)
 
     def action_prev_theme(self) -> None:
@@ -3281,6 +3325,8 @@ class SessionManagerApp(App[None]):
 
     def action_delete_items(self) -> None:
         """Pane-aware delete: projects → projects; sessions/detail → sessions."""
+        if not self._guard("delete_items"):
+            return
         if self._focus_pane() == "projects":
             self._confirm_delete_projects(self._target_projects())
             return

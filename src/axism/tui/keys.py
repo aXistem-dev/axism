@@ -125,7 +125,7 @@ REGISTRY: tuple[KeyAction, ...] = (
     KeyAction(
         "next_pane", ("tab",), "Pane",
         "Focus the next pane (projects → sessions → details)",
-        "Everywhere", _scopes("main"), footer_priority=10, priority=True,
+        "Everywhere", _scopes("main"), footer_priority=80, priority=True,
     ),
     KeyAction(
         "previous_pane", ("shift+tab",), "Pane back",
@@ -145,7 +145,7 @@ REGISTRY: tuple[KeyAction, ...] = (
     KeyAction(
         "show_settings", ("comma",), "Settings",
         "Open Settings (agents and their folders)",
-        "Everywhere", _scopes("main"), footer_priority=60, priority=True,
+        "Everywhere", _scopes("main"), footer_priority=90, priority=True,
     ),
     KeyAction(
         "show_version", ("v", "V"), "Version",
@@ -162,17 +162,17 @@ REGISTRY: tuple[KeyAction, ...] = (
     ),
     KeyAction(
         "show_help", ("question_mark",), "Help",
-        "Show every key", "Everywhere", _scopes("main"), footer_priority=70,
+        "Show every key", "Everywhere", _scopes("main"), footer_priority=60,
     ),
     KeyAction(
         "quit", ("q", "Q"), "Quit",
-        "Quit aXism", "Everywhere", _scopes("main"), footer_priority=80,
+        "Quit aXism", "Everywhere", _scopes("main"), footer_priority=70,
     ),
     # --- Projects (pane-aware: projects pane acts on projects) ----------------
     KeyAction(
         "toggle_select", ("space",), "Mark",
         "Mark or unmark the highlighted project or session",
-        "Projects", _scopes("projects", "sessions"), footer_priority=20,
+        "Projects", _scopes("projects", "sessions"), footer_priority=10,
     ),
     KeyAction(
         "select_all", ("a", "A"), "Mark all",
@@ -198,17 +198,18 @@ REGISTRY: tuple[KeyAction, ...] = (
     KeyAction(
         "resume_session", ("o", "O"), "Open",
         "Open the highlighted session in its agent",
-        "Sessions", _SESSIONS, footer_priority=30,
+        # Also listed (dimmed) in the projects pane, so it is easy to find.
+        "Sessions", _LISTS, footer_priority=20,
     ),
     KeyAction(
         "stop_sessions", ("s", "S"), "Stop",
         "Stop the marked or highlighted running sessions",
-        "Sessions", _SESSIONS, priority=True,
+        "Sessions", _SESSIONS, footer_priority=30, priority=True,
     ),
     KeyAction(
         "rename_session", ("n", "N"), "Rename",
         "Rename the highlighted session",
-        "Sessions", _SESSIONS, priority=True,
+        "Sessions", _SESSIONS, footer_priority=35, priority=True,
     ),
     KeyAction(
         "focus_session_filter", ("slash",), "Filter",
@@ -223,7 +224,7 @@ REGISTRY: tuple[KeyAction, ...] = (
     KeyAction(
         "back", ("escape",), "Back",
         "Details: back to the sessions list · filter: clear it and leave",
-        "Details & reader", _scopes("details", "filter"),
+        "Details & reader", _scopes("details", "filter"), footer_priority=55,
     ),
 )
 
