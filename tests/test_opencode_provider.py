@@ -243,6 +243,7 @@ def test_rename_calls_ops_with_row(prov, monkeypatch):
 
 def test_move_sessions_stops_live_first_and_aborts_on_failed_stop(prov, monkeypatch):
     order: list = []
+    monkeypatch.setattr(ops, "can_move", lambda r: True)
     sessions = [s for p in prov.discover() for s in p.sessions]
     live = {
         A: LiveSession(A, "interactive", state="open", pid=77),
@@ -273,6 +274,7 @@ def test_move_sessions_stops_live_first_and_aborts_on_failed_stop(prov, monkeypa
 
 
 def test_move_sessions_skips_same_directory_and_passes_service_message(prov, monkeypatch):
+    monkeypatch.setattr(ops, "can_move", lambda r: True)
     sessions = [s for p in prov.discover() for s in p.sessions]
     monkeypatch.setattr(prov, "merge_live", lambda *a, **k: {})
 
@@ -441,3 +443,102 @@ def test_tui_glyph_O():
     from axism.tui.app import _agent_glyph
 
     assert _agent_glyph("opencode") == "O"
+
+
+def test_move_without_service_stops_nothing_and_moves_nothing(
+    prov, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(ops, "can_move", lambda r: False)
+    live = {A: LiveSession(A, "interactive", state="open", pid=77)}
+    monkeypatch.setattr(prov, "merge_live", lambda *a, **k: live)
+
+    def boom(*a, **k):
+        raise AssertionError("must not be called")
+
+    monkeypatch.setattr(prov, "stop", boom)
+    monkeypatch.setattr(ops, "move_session", boom)
+    monkeypatch.setattr("axism.providers.opencode.terminate_pid", boom)
+    sessions = [s for p in prov.discover() for s in p.sessions]
+    for dry in (False, True):
+        res = prov.move_sessions(sessions, DEST, dry_run=dry)
+        assert not res.ok
+        assert res.message == ops.MOVE_NEEDS_DEFAULT_ROOT  # custom root
+        assert res.actions == [ops.MOVE_NEEDS_DEFAULT_ROOT]
+    res = prov.move_projects(prov.discover(), DEST)
+    assert not res.ok and res.actions == [ops.MOVE_NEEDS_DEFAULT_ROOT]
+
+    default = OpenCodeProvider()  # default data folder
+    res = default.move_sessions(sessions, DEST)
+    assert res.message == ops.MOVE_NEEDS_SERVICE
+    assert res.actions == [ops.MOVE_NEEDS_SERVICE]
+
+
+def test_live_child_makes_parent_live_and_blocks_delete(prov, monkeypatch):
+    monkeypatch.setattr(ops, "service_info", lambda r: None)
+    monkeypatch.setattr(ops, "active_session_ids", lambda r: {C})
+    _no_processes(monkeypatch)
+    live = prov.merge_live()
+    assert live[A].state == "running" and live[A].pid is None
+    assert C not in live and B not in live
+    plan = prov.plan_delete(A)
+    assert plan.live is not None and plan.blocked_reason
+    assert prov.plan_delete(A, force=True).blocked_reason is None
+
+    # a client opened directly on the child
+    monkeypatch.setattr(ops, "active_session_ids", lambda r: set())
+    _no_processes(monkeypatch, {C: 99})
+    live = prov.merge_live()
+    assert live[A].state == "open" and live[A].pid == 99
+    assert prov.plan_delete(A).blocked_reason
+
+
+def test_live_grandchild_makes_top_level_live(tmp_path, monkeypatch):
+    def s(i, parent):
+        return {"id": i, "project_id": "p1", "parent_id": parent,
+                "directory": CWD, "title": i, "time_created": 1, "time_updated": 2}
+
+    r = tmp_path / "deep" / "opencode"
+    make_opencode_db(
+        r,
+        sessions=[s("ses_t1", None), s("ses_k1", "ses_t1"), s("ses_g1", "ses_k1")],
+        projects=[{"id": "p1", "worktree": CWD}],
+        messages=[],
+    )
+    p = OpenCodeProvider(config_dir=r)
+    monkeypatch.setattr(ops, "service_info", lambda root: None)
+    monkeypatch.setattr(ops, "active_session_ids", lambda root: {"ses_g1"})
+    _no_processes(monkeypatch)
+    assert p.merge_live()["ses_t1"].state == "running"
+
+
+def test_stop_interrupts_every_active_family_member(prov, monkeypatch):
+    monkeypatch.setattr(ops, "service_info", lambda r: None)
+    monkeypatch.setattr(ops, "active_session_ids", lambda r: {A, C})
+    _no_processes(monkeypatch, {C: 99})
+    interrupted: list = []
+    monkeypatch.setattr(
+        ops, "interrupt_session",
+        lambda root, row: interrupted.append(row.id) or (True, f"interrupted {row.id[:12]}"),
+    )
+    terminated: list = []
+    monkeypatch.setattr(
+        "axism.providers.opencode.terminate_pid",
+        lambda pid, expect=None: terminated.append((pid, expect)) or (True, f"stopped pid {pid}"),
+    )
+    live = prov.merge_live()[A]
+    ok, msg = prov.stop(A, live)
+    assert ok and sorted(interrupted) == sorted([A, C])
+    assert terminated == [(99, C)]
+
+    # child only active: parent is not interrupted
+    interrupted.clear()
+    monkeypatch.setattr(ops, "active_session_ids", lambda r: {C})
+    ok, msg = prov.stop(A, prov.merge_live()[A])
+    assert ok and interrupted == [C]
+
+    # one failed step fails the stop and every step is listed
+    monkeypatch.setattr(
+        ops, "interrupt_session", lambda root, row: (False, f"error: {row.id[:12]} stuck")
+    )
+    ok, msg = prov.stop(A, prov.merge_live()[A])
+    assert not ok and short_id(C) in msg and "stopped pid 99" in msg

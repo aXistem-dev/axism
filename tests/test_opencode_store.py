@@ -198,3 +198,21 @@ def test_collect_fragments_never_deletable(tmp_path):
     assert f.size_bytes > 0
     empty = fragments.collect_fragments(tmp_path / "nope", "ses_a1")
     assert empty.fragments == []
+
+
+def test_family_map_walks_whole_descendant_tree(tmp_path):
+    def s(i, parent):
+        return {"id": i, "project_id": "p1", "parent_id": parent,
+                "directory": "/home/alice/one", "title": i,
+                "time_created": 1, "time_updated": 2}
+
+    make_opencode_db(
+        tmp_path,
+        sessions=[s("ses_t1", None), s("ses_k1", "ses_t1"), s("ses_g1", "ses_k1"),
+                  s("ses_t2", None)],
+        projects=[{"id": "p1", "worktree": "/home/alice/one"}],
+        messages=[],
+    )
+    fam = discover.family_map(tmp_path)
+    assert fam == {"ses_t1": ["ses_g1", "ses_k1"], "ses_t2": []}
+    assert discover.family_map(tmp_path / "none") == {}

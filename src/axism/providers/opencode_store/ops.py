@@ -44,6 +44,10 @@ MOVE_NEEDS_SERVICE = (
     "refused: moving OpenCode sessions needs OpenCode's background service — "
     "start it with `opencode service start` and try again"
 )
+MOVE_NEEDS_DEFAULT_ROOT = (
+    "refused: moving OpenCode sessions needs OpenCode's background service, "
+    "which only runs for the default data folder"
+)
 
 _ID_ALPHABET = string.digits + string.ascii_letters
 _ID_RANDOM_LEN = 14
@@ -105,6 +109,14 @@ def choose_server(root: Path) -> ServerChoice:
         env = {**os.environ, "XDG_DATA_HOME": str(root.parent)}
         return ServerChoice(flags=["--standalone"], env=env, via="standalone")
     raise UnsupportedOperation(UNSUPPORTED_ROOT)
+
+
+def can_move(root: Path) -> bool:
+    """Whether a move can go through the background service for this folder."""
+    try:
+        return choose_server(root).via == "service"
+    except UnsupportedOperation:
+        return False
 
 
 def _exec(

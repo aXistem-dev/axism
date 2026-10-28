@@ -834,3 +834,15 @@ def test_unsupported_operation_message_reads_the_same(tmp_path: Path):
             call()
         assert str(exc.value) == ops.UNSUPPORTED_ROOT
         assert is_failure_line(str(exc.value))
+
+
+def test_can_move_only_through_the_service(
+    service_up: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    assert ops.can_move(service_up) is True
+    monkeypatch.setattr(ops, "service_info", lambda root: None)
+    assert ops.can_move(service_up) is False
+    assert ops.can_move(tmp_path / "elsewhere") is False  # unsupported root
+    assert ops.can_move(tmp_path / "opencode") is False  # custom root
+    assert "only runs for the default data folder" in ops.MOVE_NEEDS_DEFAULT_ROOT
+    assert ops.MOVE_NEEDS_DEFAULT_ROOT.startswith("refused: ")

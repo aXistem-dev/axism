@@ -230,6 +230,40 @@ def session_row(root: Path, session_id: str) -> SessionRow | None:
     )
 
 
+def family_map(root: Path) -> dict[str, list[str]]:
+    """Top-level session id -> every descendant id (children, grandchildren, …)."""
+    if layout_status(root) != "ok":
+        return {}
+    try:
+        con = connect(db_path(root))
+    except sqlite3.Error:
+        return {}
+    try:
+        pairs = list(con.execute("SELECT id, parent_id FROM session_v2"))
+    except sqlite3.Error:
+        return {}
+    finally:
+        con.close()
+    kids: dict[str, list[str]] = {}
+    for sid, parent in pairs:
+        if parent is not None:
+            kids.setdefault(parent, []).append(sid)
+    out: dict[str, list[str]] = {}
+    for sid, parent in pairs:
+        if parent is not None:
+            continue
+        seen: set[str] = set()
+        todo = list(kids.get(sid, []))
+        while todo:
+            cur = todo.pop()
+            if cur in seen or cur == sid:
+                continue
+            seen.add(cur)
+            todo.extend(kids.get(cur, []))
+        out[sid] = sorted(seen)
+    return out
+
+
 def transcript_turns(root: Path, session_id: str) -> list[tuple[str, str]]:
     """(role, text) for user and assistant messages, in ``seq`` order."""
     if layout_status(root) != "ok":

@@ -33,6 +33,7 @@ from axism.providers.opencode_store import ops
 from axism.providers.opencode_store.paths import (
     db_path,
     default_data_dir,
+    is_default_root,
     is_session_id,
     short_id,
 )
@@ -118,17 +119,23 @@ class OpenCodeProvider(ProviderBase):
         root = root or self.config_root()
         if oc_discover.layout_status(root) != "ok":
             return {}
-        ids = {s.session_id for p in self.discover(root) for s in p.sessions}
-        if not ids:
+        families = {
+            sid: {sid, *kids}
+            for sid, kids in oc_discover.family_map(root).items()
+        }
+        if not families:
             return {}
+        owner = {m: top for top, members in families.items() for m in members}
         service = ops.service_info(root)
         service_pid = service.pid if service is not None else None
-        running = (ops.active_session_ids(root) & ids) if use_cli else set()
-        clients = {
-            sid: pid
-            for sid, pid in find_agent_sessions(ids, ops.PROCESS_NAMES).items()
-            if pid != service_pid
-        }
+        active = (ops.active_session_ids(root) & set(owner)) if use_cli else set()
+        found = find_agent_sessions(set(owner), ops.PROCESS_NAMES)
+        running = {owner[m] for m in active}
+        clients: dict[str, int] = {}
+        # A client on the top-level session wins; otherwise any family member's.
+        for member, pid in sorted(found.items(), key=lambda kv: kv[0] != owner[kv[0]]):
+            if pid != service_pid:
+                clients.setdefault(owner[member], pid)
         live: dict[str, LiveSession] = {}
         for sid in sorted(running | set(clients)):
             live[sid] = LiveSession(
@@ -175,19 +182,27 @@ class OpenCodeProvider(ProviderBase):
             live = self.merge_live(root).get(session_id)
         if live is None or not self.can_stop(live):
             return False, f"no running OpenCode session {short_id(session_id)}"
+        family = [session_id, *oc_discover.family_map(root).get(session_id, [])]
         steps: list[tuple[bool, str]] = []
+        service = ops.service_info(root)
         if live.state == "running":
-            row = oc_discover.session_row(root, session_id)
-            if row is None:
-                steps.append((False, f"refused: session {short_id(session_id)} not found"))
-            else:
-                steps.append(ops.interrupt_session(root, row))
+            active = ops.active_session_ids(root) & set(family)
+            for sid in sorted(active) or [session_id]:
+                row = oc_discover.session_row(root, sid)
+                if row is None:
+                    steps.append((False, f"refused: session {short_id(sid)} not found"))
+                else:
+                    steps.append(ops.interrupt_session(root, row))
+        pids: dict[int, str] = {}
+        for member, pid in find_agent_sessions(set(family), ops.PROCESS_NAMES).items():
+            pids.setdefault(pid, member)
         if live.pid is not None:
-            service = ops.service_info(root)
-            if service is not None and service.pid == live.pid:
+            pids.setdefault(live.pid, session_id)
+        for pid, member in pids.items():
+            if service is not None and service.pid == pid:
                 steps.append((False, "refused: not signalling the OpenCode background service"))
             else:
-                steps.append(terminate_pid(live.pid, expect=session_id))
+                steps.append(terminate_pid(pid, expect=member))
         return all(ok for ok, _ in steps), "; ".join(msg for _, msg in steps)
 
     # -- inventory / rename ---------------------------------------------------
@@ -226,6 +241,13 @@ class OpenCodeProvider(ProviderBase):
         if not dest_cwd:
             return MoveResult(False, f"refused: invalid destination: {dest!r}")
         root = self.config_root()
+        if not ops.can_move(root):
+            refusal = (
+                ops.MOVE_NEEDS_SERVICE
+                if is_default_root(root)
+                else ops.MOVE_NEEDS_DEFAULT_ROOT
+            )
+            return MoveResult(False, refusal, actions=[refusal], dest_cwd=dest_cwd)
         live_map = self.merge_live(root)
         actions: list[str] = []
         moved = unchanged = 0
