@@ -55,7 +55,7 @@ def rename_session(
     except OSError as exc:
         return False, f"failed to write transcript: {exc}"
 
-    messages = [f"renamed to {title!r}"]
+    messages = [f"renamed to '{title}'"]
     job_state = root / "jobs" / sess.session_id[:8] / "state.json"
     if job_state.is_file():
         try:

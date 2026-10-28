@@ -712,3 +712,28 @@ def test_delete_preview_shows_stored_size_and_keeps_the_file(prov, monkeypatch, 
     body, _ = _format_session_delete_confirm([sess], [plan], [], prov)
     assert "the database file stays" in str(body)
     assert f"{stored} B" in str(body)
+
+
+def test_print_only_pastes_correctly_with_spaces_in_the_data_folder(
+    prov, monkeypatch, capsys
+):
+    import shlex
+
+    _record_all_providers(prov.config_root())
+    monkeypatch.setattr("shutil.which", lambda c, *a, **k: "/bin/opencode")
+    monkeypatch.setattr(OpenCodeProvider, "merge_live", lambda self, *a, **k: {})
+    monkeypatch.setattr(
+        OpenCodeProvider,
+        "open_command",
+        lambda self, sess, live: (
+            ["env", "XDG_DATA_HOME=/tmp/my data", "opencode", "--session", A],
+            None,
+        ),
+    )
+    with pytest.raises(SystemExit):
+        cli.main(["resume", A, "--print-only", "--provider", "opencode",
+                  "--config-dir", str(prov.config_root())])
+    first = capsys.readouterr().out.splitlines()[0]
+    assert shlex.split(first) == [
+        "env", "XDG_DATA_HOME=/tmp/my data", "opencode", "--session", A
+    ]

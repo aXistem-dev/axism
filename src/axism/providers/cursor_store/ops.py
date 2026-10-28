@@ -63,7 +63,7 @@ def rename_session(root: Path, session_id: str, title: str) -> tuple[bool, str]:
 
     if not ok:
         return False, "; ".join(problems) or "rename failed"
-    return True, f"renamed to {clean!r}"
+    return True, f"renamed to '{clean}'"
 
 
 def _dest_dir_for(root: Path, directory: Path, dest_cwd: str) -> Path:

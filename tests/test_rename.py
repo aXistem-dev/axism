@@ -37,3 +37,12 @@ def test_rename_after_torn_last_line(fake_root):
     assert ok
     _p, again = find_session("11111111", fake_root)
     assert again.title == "Fresh"
+
+
+def test_rename_message_quotes_title_without_repr(fake_root: Path):
+    ok, msg = rename_session(SESSION_A, "ends with \\", root=fake_root)
+    assert ok is True
+    assert msg.startswith("renamed to 'ends with \\'")
+    assert "\\\\" not in msg
+    ok, msg = rename_session(SESSION_A, "it's \"x\"", root=fake_root)
+    assert msg.startswith("renamed to 'it's \"x\"'")

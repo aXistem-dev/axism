@@ -504,3 +504,10 @@ def test_storage_label_follows_the_session(cursor_env: tuple[Path, str]):
     sessions = {s.session_id: s for p in provider.discover() for s in p.sessions}
     assert provider.stored_in_database(sessions[CLI_ONLY]) is True
     assert provider.stored_in_database(sessions[AGENT_ONLY]) is False
+
+
+def test_rename_message_quotes_title_without_repr(cursor_env: tuple[Path, str]):
+    provider = CursorProvider()
+    for sid in (AGENT_ONLY, CLI_ONLY):
+        ok, msg = provider.rename(sid, "ends with \\")
+        assert ok and msg == "renamed to 'ends with \\'"

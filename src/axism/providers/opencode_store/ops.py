@@ -337,7 +337,7 @@ def rename_session(root: Path, row: SessionRow, title: str) -> tuple[bool, str]:
     ok, body = _api(choice, "PATCH", f"/api/session/{row.id}", data={"title": clean})
     if not ok:
         return False, f"error: {BINARY} rename of {short_id(row.id)} failed: {body}"
-    return True, f"renamed to {clean!r}"
+    return True, f"renamed to '{clean}'"
 
 
 def delete_session(root: Path, row: SessionRow) -> tuple[bool, str]:

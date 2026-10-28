@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Rename messages show the new title in plain quotes (no doubled backslash); `resume --print-only` prints a command that pastes correctly even with spaces in paths
 
 - OpenCode sub-agents are folded recursively: a session's size and sub-agent count include grandchildren
 - The delete preview for database-backed agents (OpenCode, Hermes) shows the session's stored size instead of `Bytes: 0`, saying that only the session's rows are removed through the agent and the database file stays

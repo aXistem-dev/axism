@@ -128,7 +128,7 @@ def write_cli_meta_name(db: Path, name: str) -> tuple[bool, str]:
         con.close()
     except sqlite3.Error as exc:
         return False, f"could not write chat metadata: {exc}"
-    return True, f"renamed to {name!r}"
+    return True, f"renamed to '{name}'"
 
 
 def _agent_session(conv_dir: Path, slug: str, cwd: str) -> SessionMeta | None:

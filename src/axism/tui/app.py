@@ -463,7 +463,7 @@ def _format_session_delete_confirm(
     plans: list,
     preview: list[str],
     provider: SessionProvider | None = None,
-) -> tuple[str, list[str]]:
+) -> tuple[Content, list[str]]:
     """Return (body, warning lines) for the delete confirm dialog."""
     warnings: list[str] = []
     for s, plan in zip(targets, plans, strict=False):
@@ -542,7 +542,7 @@ def _memory_line(n_projects: int, keep: bool) -> Content:
 def _format_project_delete_confirm(
     projects: list[tuple[str, str, object, list[str]]],
     provider: SessionProvider | None = None,
-) -> tuple[str, list[str]]:
+) -> tuple[Content, list[str]]:
     """Format confirm body for one or more projects.
 
     ``projects`` items are ``(slug, cwd, plan, preview_actions)``.

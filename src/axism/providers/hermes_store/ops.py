@@ -64,7 +64,7 @@ def rename_session(root: Path, session_id: str, title: str) -> tuple[bool, str]:
     rc, out = run_hermes(root, ["sessions", "rename", session_id, "--", clean])
     if rc != 0:
         return False, out or f"hermes sessions rename failed for {session_id}"
-    return True, f"renamed to {clean!r}"
+    return True, f"renamed to '{clean}'"
 
 
 def delete_session(root: Path, session_id: str) -> tuple[bool, str]:

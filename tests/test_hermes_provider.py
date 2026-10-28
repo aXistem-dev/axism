@@ -518,3 +518,11 @@ def test_transcript_keeps_plain_prompts_that_happen_to_be_json(
     con.close()
     turns = hermes_discover.transcript_turns(root, WEBUI_SESSION)
     assert turns == [("user", "web prompt")] + [("user", c) for c in prompts]
+
+
+def test_rename_message_quotes_title_without_repr(
+    hermes_env: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(hermes_ops, "run_hermes", lambda *_a, **_k: (0, ""))
+    ok, msg = HermesProvider().rename(CLI_SESSION, "ends with \\")
+    assert ok and msg == "renamed to 'ends with \\'"

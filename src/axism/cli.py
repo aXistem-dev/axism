@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
 from pathlib import Path
 
@@ -279,7 +280,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
     live = provider.merge_live(use_cli=not args.no_cli).get(sess.session_id)
     if args.print_only:
         argv, cwd = provider.open_command(sess, live)
-        print(" ".join(argv))
+        print(shlex.join(argv))
         if cwd:
             print(f"# cwd: {cwd}")
         return 0
