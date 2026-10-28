@@ -11,6 +11,7 @@ is never replaced: the screen says why and Enter saves nothing.
 
 from __future__ import annotations
 
+import os
 import threading
 from collections.abc import Mapping
 from pathlib import Path
@@ -44,9 +45,39 @@ FIX_HINT = "fix or remove it, then restart aXism"
 UNREADABLE_REFUSAL = f"settings.json could not be read — {FIX_HINT}"
 
 CHECKING = "checking…"
+STATUS_UNKNOWN = "status unknown"
 FOLDER_MISSING = "folder missing"
 FOLDER_UNREADABLE = "folder unreadable"
 COMMAND_MISSING = "no sessions · command not on PATH"
+
+
+def folder_state(root: Path) -> str:
+    """``dir`` (readable folder), ``missing`` or ``unreadable``.
+
+    Probes the folder itself, and for an absent one the nearest existing
+    parent, so a folder behind an unreachable parent is not called missing.
+    """
+    try:
+        if root.is_dir():
+            with os.scandir(root):
+                pass
+            return "dir"
+    except OSError:
+        return "unreadable"
+    parent = root
+    while True:
+        parent = parent.parent
+        try:
+            with os.scandir(parent):
+                pass
+            if not os.access(parent, os.X_OK):
+                return "unreadable"
+            return "missing"
+        except (FileNotFoundError, NotADirectoryError):
+            if parent == parent.parent:
+                return "missing"
+        except OSError:
+            return "unreadable"
 
 
 def found_status(count: int | None) -> str:
@@ -139,8 +170,9 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
         except OSError:
             return FOLDER_UNREADABLE
         try:
-            if not root.is_dir():
-                return FOLDER_MISSING
+            state = folder_state(root)
+            if state != "dir":
+                return FOLDER_MISSING if state == "missing" else FOLDER_UNREADABLE
             if not provider.detect():
                 # The folder holds no sessions and the command is not on PATH.
                 return COMMAND_MISSING
@@ -161,7 +193,10 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
         for pid in self._provider_ids:
             if self._leaving.is_set():
                 return
-            status = self._status_for(pid)
+            try:
+                status = self._status_for(pid)
+            except Exception:
+                status = STATUS_UNKNOWN
             if self._leaving.is_set():
                 return
             try:

@@ -74,6 +74,9 @@ def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     # Agent homes used when no folder is recorded (detection): never the real ones.
     monkeypatch.setenv("CURSOR_DATA_DIR", str(tmp_path / "cursor-home"))
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    # Status and detection never depend on the host PATH.
+    for mod in ("claude_code", "cursor", "hermes", "opencode"):
+        monkeypatch.setattr(f"axism.providers.{mod}.binary_on_path", lambda *a: False, raising=False)
     real = tui.federate_merge_live
     monkeypatch.setattr(
         tui, "federate_merge_live", lambda provs, use_cli=True: real(provs, use_cli=False)
@@ -766,3 +769,70 @@ def test_untouched_folders_keep_their_recorded_text(tmp_path, monkeypatch):
 
     _run(main())
     assert _file(tmp_path)["providers"]["hermes"]["config_dir"] == str(link)
+
+
+# ---- status probing of real providers ------------------------------------------
+
+
+def _real_status(tmp_path, pid, folder):
+    from axism.settings import ProviderPrefs, Settings
+
+    settings = Settings(providers={pid: ProviderPrefs(config_dir=str(folder))})
+    return SettingsScreen(settings, session_counts={})._status_for(pid)
+
+
+@pytest.mark.skipif(hasattr(__import__("os"), "geteuid") and __import__("os").geteuid() == 0,
+                    reason="permissions do not apply to root")
+@pytest.mark.parametrize("pid", ["claude_code", "hermes", "opencode", "cursor"])
+def test_unreadable_real_folder_is_reported(tmp_path, pid):
+    folder = tmp_path / "locked"
+    folder.mkdir()
+    folder.chmod(0)
+    try:
+        assert _real_status(tmp_path, pid, folder) == "folder unreadable"
+    finally:
+        folder.chmod(0o700)
+
+
+@pytest.mark.skipif(hasattr(__import__("os"), "geteuid") and __import__("os").geteuid() == 0,
+                    reason="permissions do not apply to root")
+def test_folder_behind_an_unreachable_parent_is_unreadable(tmp_path):
+    parent = tmp_path / "gate"
+    (parent / "inner").mkdir(parents=True)
+    parent.chmod(0)
+    try:
+        assert _real_status(tmp_path, "hermes", parent / "inner") == "folder unreadable"
+    finally:
+        parent.chmod(0o700)
+    assert _real_status(tmp_path, "hermes", tmp_path / "a" / "b") == "folder missing"
+
+
+def test_a_failing_agent_does_not_stall_later_rows(tmp_path, monkeypatch):
+    from axism.tui import settings_screen as ss
+
+    _setup(tmp_path, monkeypatch)
+    folder = tmp_path / "ok"
+    folder.mkdir()
+
+    def fake(pid, config_dir=None):
+        if pid == "cursor":
+            return _FakeProvider(folder, detect=RuntimeError("boom"))
+        return _FakeProvider(folder)
+
+    monkeypatch.setattr(ss, "get_provider", fake)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            screen = await _open(app, pilot)
+            for _ in range(50):
+                await pilot.pause()
+                if not any("checking…" in r for r in _rows(screen)):
+                    break
+            rows = dict(zip(IDS, _rows(screen), strict=True))
+            assert "status unknown" in rows["cursor"]
+            assert "found · 0 sessions" in rows["hermes"]
+            assert "found · 0 sessions" in rows["opencode"]
+            await pilot.press("escape")
+
+    _run(main())
