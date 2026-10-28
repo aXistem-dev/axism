@@ -546,7 +546,7 @@ def _change_providers(args: argparse.Namespace, settings: Settings) -> int | Non
     if settings.load_error():
         print(
             f"axism: {settings_path()} could not be read ({settings.load_error()}); "
-            "fix or remove it first, nothing was changed",
+            "nothing was changed; fix or remove it, then restart aXism",
             file=sys.stderr,
         )
         return 1
@@ -568,8 +568,9 @@ def _change_providers(args: argparse.Namespace, settings: Settings) -> int | Non
         enabled[disable] = False
     for pid, on in enabled.items():
         settings.provider_prefs(pid).enabled = on
-    if make_default:
-        settings.active_provider = make_default
+    # Switching an agent on or off never moves the default: it is stored as it
+    # stood (or as ``--default`` set it).
+    settings.active_provider = default
     try:
         save_settings(settings)
     except OSError as exc:

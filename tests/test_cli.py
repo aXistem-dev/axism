@@ -317,3 +317,28 @@ def test_tui_provider_and_config_dir_apply_for_run_only(
     assert set(roots) == {"claude_code", "cursor"}
 
     assert path.read_bytes() == before
+
+
+def test_enabling_an_agent_never_moves_the_stored_default(
+    _isolated_settings: Path, fake_root: Path
+):
+    # The stored default (Cursor) is switched off, so Claude Code is the default.
+    path = _write_choice(
+        _isolated_settings, "cursor", {**ALL_OFF_BUT_CLAUDE, "cursor": False}
+    )
+    assert _run(["providers", "--enable", "cursor"]) == 0
+    assert _saved_choice(path) == (
+        "claude_code",
+        {**ALL_OFF_BUT_CLAUDE, "cursor": True},
+    )
+    assert _run(["providers", "--default", "cursor"]) == 0
+    assert _saved_choice(path)[0] == "cursor"
+
+
+def test_unreadable_refusal_ends_with_the_fix_hint(
+    _isolated_settings: Path, fake_root: Path, capsys
+):
+    (_isolated_settings / "settings.json").write_text("{not json", encoding="utf-8")
+    assert _run(["providers", "--enable", "hermes"]) == 1
+    err = capsys.readouterr().err.strip()
+    assert err.endswith("fix or remove it, then restart aXism")

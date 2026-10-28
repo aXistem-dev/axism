@@ -90,3 +90,28 @@ def test_enabled_accepts_only_real_booleans():
     assert enabled(None) is True
     assert enabled([]) is True
     assert enabled("nonsense") is True
+
+
+import pytest
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"providers": []}',
+        '{"providers": "cursor"}',
+        '{"providers": {"cursor": true}}',
+        '{"providers": {"cursor": {"enabled": false}, "hermes": null}}',
+    ],
+)
+def test_wrongly_typed_providers_count_as_unreadable(tmp_path: Path, content: str):
+    path = tmp_path / "settings.json"
+    path.write_text(content, encoding="utf-8")
+    assert load_settings(path).load_error()
+
+
+def test_well_typed_or_absent_providers_are_readable(tmp_path: Path):
+    path = tmp_path / "settings.json"
+    for content in ('{}', '{"providers": null}', '{"providers": {"cursor": {}}}'):
+        path.write_text(content, encoding="utf-8")
+        assert load_settings(path).load_error() == ""

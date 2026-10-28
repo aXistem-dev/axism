@@ -172,9 +172,15 @@ class ConfirmDeleteScreen(ScrollKeys, DialogScreen[bool]):
         border: double $error;
         background: $error 12%;
     }
+    ConfirmDeleteScreen #confirm-dialog.-warning {
+        border: thick $warning;
+    }
     ConfirmDeleteScreen #confirm-title {
         color: $error;
         text-style: bold;
+    }
+    ConfirmDeleteScreen .-warning #confirm-title {
+        color: $warning;
     }
     ConfirmDeleteScreen .-project-danger #confirm-title {
         background: $error 35%;
@@ -228,6 +234,7 @@ class ConfirmDeleteScreen(ScrollKeys, DialogScreen[bool]):
         warnings: list[str] | None = None,
         confirm_verb: str = "Delete",
         project_danger: bool = False,
+        warning: bool = False,
         memory_toggle: Callable[[bool], tuple[str | Content, str | Content]] | None = None,
     ) -> None:
         super().__init__()
@@ -241,6 +248,8 @@ class ConfirmDeleteScreen(ScrollKeys, DialogScreen[bool]):
         self.warnings = warnings or []
         self.confirm_verb = confirm_verb
         self.project_danger = project_danger
+        # A cautious question that is not a deletion: warning tone, "n Cancel".
+        self.warning = warning and not project_danger
 
     def compose(self) -> ComposeResult:
         warn = (
@@ -256,7 +265,11 @@ class ConfirmDeleteScreen(ScrollKeys, DialogScreen[bool]):
                     "!  This removes the whole project directory and linked "
                     "session fragments."
                 )
-        dialog_classes = "dialog -project-danger" if self.project_danger else "dialog"
+        dialog_classes = "dialog"
+        if self.project_danger:
+            dialog_classes = "dialog -project-danger"
+        elif self.warning:
+            dialog_classes = "dialog -warning"
         yield Vertical(
             Vertical(
                 Static(title, id="confirm-title"),
@@ -294,6 +307,8 @@ class ConfirmDeleteScreen(ScrollKeys, DialogScreen[bool]):
             if self.confirm_verb.lower() in {"delete"}
             else self.confirm_verb
         )
+        if self.warning:
+            return {"confirm": verb, "decline": "Cancel"}
         return {"confirm": verb}
 
     def footer_hidden(self) -> frozenset[str]:

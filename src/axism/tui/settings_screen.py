@@ -3,13 +3,15 @@
 Space switches the highlighted agent on or off, ``*`` makes it the CLI default
 (the agent commands use without ``--provider``), Tab goes to its folder field,
 Enter saves and Esc cancels. Each row shows the agent's id and a status
-worked out once when the screen opens: ``found · N sessions``,
-``folder missing`` or ``command not installed``. A settings.json that could
-not be read is never replaced: the screen says why and Enter saves nothing.
+worked out in the background after the screen opens (``checking…`` until
+then): ``found · N sessions``, ``folder missing``, ``folder unreadable`` or
+``no sessions · command not on PATH``. A settings.json that could not be read
+is never replaced: the screen says why and Enter saves nothing.
 """
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -21,6 +23,7 @@ from textual.widgets.option_list import Option
 from axism.providers import (
     PROVIDER_LABELS,
     UnsupportedOperation,
+    default_provider_id,
     default_refusal,
     disable_refusal,
     get_provider,
@@ -37,10 +40,13 @@ MARK_OFF = "☐"
 # While the folder field has focus only these act (Inputs win).
 SETTINGS_INPUT_ACTIONS = frozenset({"cancel", "save", "focus_folder", "focus_list"})
 
-UNREADABLE_REFUSAL = "settings.json could not be read — fix or remove it first"
+FIX_HINT = "fix or remove it, then restart aXism"
+UNREADABLE_REFUSAL = f"settings.json could not be read — {FIX_HINT}"
 
+CHECKING = "checking…"
 FOLDER_MISSING = "folder missing"
-COMMAND_MISSING = "command not installed"
+FOLDER_UNREADABLE = "folder unreadable"
+COMMAND_MISSING = "no sessions · command not on PATH"
 
 
 def found_status(count: int | None) -> str:
@@ -77,6 +83,12 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
         margin-top: 1;
         color: $text-muted;
     }
+    SettingsScreen #settings-run-note {
+        color: $text-muted;
+    }
+    SettingsScreen #settings-run-note.-empty {
+        display: none;
+    }
     SettingsScreen #settings-message {
         color: $warning;
     }
@@ -87,8 +99,14 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
         settings: Settings,
         *,
         session_counts: Mapping[tuple[str, str], int] | None = None,
+        run_provider: str | None = None,
+        run_config_dir: str | None = None,
+        run_config_agent: str | None = None,
     ) -> None:
         super().__init__()
+        self._run_provider = run_provider
+        self._run_config_dir = run_config_dir
+        self._run_config_agent = run_config_agent
         self._settings = settings
         self._provider_ids = list(PROVIDER_LABELS.keys())
         self._enabled = {
@@ -97,11 +115,13 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
         self._config_dirs = {
             pid: self._prefs(pid).config_dir for pid in self._provider_ids
         }
-        self._default = settings.active_provider
+        # The default as it stands now; enabling an agent never moves it.
+        self._default = default_provider_id(settings)
         self._path_for: str | None = None
         # (agent id, folder) -> sessions the app already found there.
         self._counts = dict(session_counts or {})
-        self._status = {pid: self._status_for(pid) for pid in self._provider_ids}
+        self._status = {pid: CHECKING for pid in self._provider_ids}
+        self._leaving = threading.Event()
 
     # ---- state -------------------------------------------------------------
 
@@ -110,24 +130,49 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
         return self._settings.providers.get(pid) or ProviderPrefs()
 
     def _status_for(self, pid: str) -> str:
-        """Found with a session count, folder missing, or command not installed."""
+        """Found with a session count, or why not (runs off the UI thread)."""
         try:
             provider = get_provider(pid, config_dir=self._prefs(pid).config_dir)
             root = provider.config_root()
+        except (KeyError, UnsupportedOperation):
+            return FOLDER_MISSING
+        except OSError:
+            return FOLDER_UNREADABLE
+        try:
             if not root.is_dir():
                 return FOLDER_MISSING
             if not provider.detect():
                 # The folder holds no sessions and the command is not on PATH.
                 return COMMAND_MISSING
-        except (OSError, KeyError, UnsupportedOperation):
-            return FOLDER_MISSING
+        except OSError:
+            return FOLDER_UNREADABLE
         count = self._counts.get((pid, str(root)))
         if count is None:
             try:
                 count = sum(len(project.sessions) for project in provider.discover(root))
+            except OSError:
+                return FOLDER_UNREADABLE
             except Exception:
                 count = None
         return found_status(count)
+
+    def _check_statuses(self) -> None:
+        """Worker thread: work out each agent's status, update its row when done."""
+        for pid in self._provider_ids:
+            if self._leaving.is_set():
+                return
+            status = self._status_for(pid)
+            if self._leaving.is_set():
+                return
+            try:
+                self.app.call_from_thread(self._set_status, pid, status)
+            except Exception:
+                return  # the screen or app is gone
+
+    def _set_status(self, pid: str, status: str) -> None:
+        self._status[pid] = status
+        if self.is_attached:
+            self._redraw()
 
     def effective_default(self) -> str:
         """The CLI default as the choices stand (Claude Code when unknown or off)."""
@@ -139,6 +184,18 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
         star = "*" if pid == self.effective_default() else " "
         mark = MARK_ON if self._enabled.get(pid) else MARK_OFF
         return f"{star} {mark} {_label(pid):<12} {pid:<12} {self._status[pid]}"
+
+    def _run_note(self) -> str:
+        """One line about this run's ``--provider`` / ``--config-dir`` (not saved)."""
+        parts = []
+        if self._run_provider:
+            parts.append(f"This run: only {_label(self._run_provider)}")
+        if self._run_config_dir:
+            agent = self._run_config_agent or self._run_provider or DEFAULT_PROVIDER
+            parts.append(
+                f"{_label(agent)} folder: {self._run_config_dir} (this run, not saved)"
+            )
+        return " · ".join(parts)
 
     def _default_line(self) -> str:
         return f"CLI default: {_label(self.effective_default())}"
@@ -155,6 +212,12 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
                     classes="dialog-title",
                 ),
                 Static(self._default_line(), id="settings-default", markup=False),
+                Static(
+                    self._run_note(),
+                    id="settings-run-note",
+                    markup=False,
+                    classes="" if self._run_note() else "-empty",
+                ),
                 classes="dialog-head",
             ),
             Vertical(
@@ -181,10 +244,11 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
         option_list.highlighted = idx
         self._load_path_input(self._provider_ids[idx])
         option_list.focus()
+        self.run_worker(self._check_statuses, thread=True, exit_on_error=False)
         reason = self._settings.load_error()
         if reason:
             self._say(
-                f"settings.json could not be read ({reason}) — fix or remove it first"
+                f"settings.json could not be read ({reason}) — {FIX_HINT}"
             )
 
     def check_action(
@@ -218,7 +282,11 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
         if self._path_for is None:
             return
         typed = self.query_one("#settings-path", Input).value.strip()
-        self._config_dirs[self._path_for] = str(Path(typed).expanduser()) if typed else None
+        if typed == (self._config_dirs.get(self._path_for) or ""):
+            return  # untouched: keep the recorded value as it is
+        self._config_dirs[self._path_for] = (
+            str(Path(typed).expanduser().resolve()) if typed else None
+        )
 
     def _load_path_input(self, pid: str) -> None:
         inp = self.query_one("#settings-path", Input)
@@ -280,6 +348,9 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
     def action_focus_list(self) -> None:
         self.option_list().focus()
 
+    def on_unmount(self) -> None:
+        self._leaving.set()
+
     def action_cancel(self) -> None:
         self.dismiss(None)
 
@@ -333,6 +404,7 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
                 title="Folder not found",
                 warnings=missing,
                 confirm_verb="Save anyway",
+                warning=True,
             ),
             _after,
         )

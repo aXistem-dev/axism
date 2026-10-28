@@ -155,7 +155,7 @@ def test_status_lines(tmp_path, monkeypatch):
             rows = dict(zip(IDS, _rows(screen), strict=True))
             assert "found · 3 sessions" in rows["claude_code"]
             assert "folder missing" in rows["cursor"]
-            assert "command not installed" in rows["hermes"]
+            assert "no sessions · command not on PATH" in rows["hermes"]
             assert "folder missing" in rows["opencode"]
             await pilot.press("escape")
 
@@ -361,13 +361,13 @@ def test_unreadable_settings_are_never_overwritten(tmp_path, monkeypatch):
             assert "☑" in _rows(screen)[0]
             message = _text(screen, "#settings-message")
             assert "settings.json could not be read (not valid JSON)" in message
-            assert "fix or remove it first" in message
+            assert "fix or remove it, then restart aXism" in message
             await pilot.press("enter")
             await pilot.pause()
             assert app.screen is screen
             message = _text(screen, "#settings-message")
             assert "settings.json could not be read" in message
-            assert "fix or remove it first" in message
+            assert "fix or remove it, then restart aXism" in message
             await pilot.press("escape")
             await pilot.pause()
             assert not isinstance(app.screen, SettingsScreen)
@@ -397,7 +397,9 @@ def test_settings_refuses_to_replace_a_file_with_a_trailing_comma(
             await pilot.pause()
             await pilot.pause()
             assert app.screen is screen
-            assert "fix or remove it first" in _text(screen, "#settings-message")
+            assert "fix or remove it, then restart aXism" in _text(
+                screen, "#settings-message"
+            )
 
     _run(main())
     assert _settings_file(tmp_path).read_text(encoding="utf-8") == original
@@ -503,3 +505,264 @@ def test_run_config_dir_stays_on_its_agent_after_the_default_changes(tmp_path, m
     assert data["providers"]["claude_code"]["config_dir"] == str(roots["claude"])
     assert data["providers"]["hermes"]["config_dir"] == str(roots["hermes"])
     assert str(override) not in _settings_file(tmp_path).read_text(encoding="utf-8")
+
+
+# ---- agent selection polish ------------------------------------------------------
+
+
+class _FakeProvider:
+    """Stand-in agent: a real folder, a configurable detect() and discover()."""
+
+    def __init__(self, root: Path, *, detect=True, discover=None, is_dir_error=False):
+        self._root = root
+        self._detect = detect
+        self._discover = discover or (lambda root: [])
+        self._is_dir_error = is_dir_error
+
+    def config_root(self) -> Path:
+        return self._root
+
+    def detect(self):
+        if isinstance(self._detect, Exception):
+            raise self._detect
+        return self._detect
+
+    def discover(self, root):
+        return self._discover(root)
+
+
+@pytest.mark.parametrize("size", SIZES)
+def test_screen_opens_before_discovery_returns(tmp_path, monkeypatch, size):
+    import threading
+
+    from axism.tui import settings_screen as ss
+
+    _setup(tmp_path, monkeypatch)
+    release = threading.Event()
+    started = threading.Event()
+    folder = tmp_path / "fake-root"
+    folder.mkdir()
+
+    def slow(root):
+        started.set()
+        release.wait(10)
+        return []
+
+    monkeypatch.setattr(
+        ss, "get_provider", lambda pid, config_dir=None: _FakeProvider(folder, discover=slow)
+    )
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=size) as pilot:
+            screen = await _open(app, pilot)
+            try:
+                assert isinstance(app.screen, SettingsScreen)
+                assert all("checking…" in row for row in _rows(screen))
+                # The screen is usable while discovery is blocked.
+                await pilot.press("j")
+                await pilot.pause()
+                assert started.wait(5)
+            finally:
+                release.set()
+            for _ in range(50):
+                await pilot.pause()
+                if not any("checking…" in row for row in _rows(screen)):
+                    break
+            rows = _rows(screen)
+            assert not any("checking…" in row for row in rows), rows
+            assert all("found · 0 sessions" in row for row in rows), rows
+            await pilot.press("escape")
+
+    _run(main())
+
+
+def test_status_wording_for_each_case(tmp_path):
+    from axism.tui import settings_screen as ss
+
+    folder = tmp_path / "there"
+    folder.mkdir()
+    screen = SettingsScreen(Settings_for(), session_counts={})
+
+    def status(provider):
+        orig = ss.get_provider
+        ss.get_provider = lambda pid, config_dir=None: provider
+        try:
+            return screen._status_for("cursor")
+        finally:
+            ss.get_provider = orig
+
+    assert status(_FakeProvider(folder, detect=False)) == "no sessions · command not on PATH"
+    assert status(_FakeProvider(folder, detect=OSError("denied"))) == "folder unreadable"
+
+    def boom(root):
+        raise OSError("denied")
+
+    assert status(_FakeProvider(folder, discover=boom)) == "folder unreadable"
+    assert status(_FakeProvider(tmp_path / "nope")) == "folder missing"
+    assert status(_FakeProvider(folder)) == "found · 0 sessions"
+
+
+def Settings_for():
+    from axism.settings import Settings
+
+    return Settings()
+
+
+def test_unreadable_folder_when_the_root_cannot_be_stat(tmp_path, monkeypatch):
+    from axism.tui import settings_screen as ss
+
+    class Denied(_FakeProvider):
+        def config_root(self):
+            return _Root()
+
+    class _Root:
+        def is_dir(self):
+            raise PermissionError("denied")
+
+    monkeypatch.setattr(ss, "get_provider", lambda pid, config_dir=None: Denied(tmp_path))
+    assert SettingsScreen(Settings_for())._status_for("cursor") == "folder unreadable"
+
+
+def test_enabling_an_agent_keeps_the_stored_default(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    data = _file(tmp_path)
+    data["active_provider"] = "cursor"  # switched off: Claude Code is the default
+    _settings_file(tmp_path).write_text(json.dumps(data), encoding="utf-8")
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            screen = await _open(app, pilot)
+            assert _text(screen, "#settings-default") == "CLI default: Claude Code"
+            await _highlight(screen, pilot, "cursor")
+            await pilot.press("space")
+            await pilot.pause()
+            assert _text(screen, "#settings-default") == "CLI default: Claude Code"
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.pause()
+            if isinstance(app.screen, ConfirmDeleteScreen):
+                await pilot.press("y")
+                await pilot.pause()
+
+    _run(main())
+    saved = _file(tmp_path)
+    assert saved["providers"]["cursor"]["enabled"] is True
+    assert saved["active_provider"] == "claude_code"
+
+
+@pytest.mark.parametrize("size", SIZES)
+def test_missing_folder_confirm_is_warning_toned(tmp_path, monkeypatch, size):
+    _setup(tmp_path, monkeypatch)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=size) as pilot:
+            screen = await _open(app, pilot)
+            await _highlight(screen, pilot, "hermes")
+            await pilot.press("tab")
+            screen.query_one("#settings-path", Input).value = str(tmp_path / "nowhere")
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.pause()
+            dialog = app.screen
+            assert isinstance(dialog, ConfirmDeleteScreen)
+            box = dialog.query_one("#confirm-dialog")
+            assert box.has_class("-warning") and not box.has_class("-project-danger")
+            footer = dialog.query_one(ContextFooter)
+            plain = footer.render_for(
+                footer.scope,
+                footer._available,
+                footer.content_region.width or 80,
+                footer._hidden,
+                footer._labels,
+            ).plain
+            assert plain.startswith("y Save anyway · n Cancel"), plain
+            # Enter and other keys do not confirm.
+            await pilot.press("enter", "x")
+            await pilot.pause()
+            assert app.screen is dialog
+            await pilot.press("Y")
+            await pilot.pause()
+            await pilot.pause()
+            assert not isinstance(app.screen, ConfirmDeleteScreen)
+
+    _run(main())
+
+
+def test_delete_confirm_is_not_warning_toned():
+    dialog = ConfirmDeleteScreen("Delete?", title="Delete")
+    assert dialog.warning is False
+
+
+@pytest.mark.parametrize("size", SIZES)
+def test_run_overrides_are_noted(tmp_path, monkeypatch, size):
+    _setup(tmp_path, monkeypatch)
+    other = tmp_path / "other-her"
+    other.mkdir()
+
+    async def main(**kw):
+        app = SessionManagerApp(**kw)
+        async with app.run_test(size=size) as pilot:
+            screen = await _open(app, pilot)
+            note = _text(screen, "#settings-run-note")
+            await pilot.press("escape")
+            return note
+
+    assert _run(main()) == ""
+    assert _run(main(run_provider="hermes")) == "This run: only Hermes"
+    assert (
+        _run(main(run_provider="hermes", run_config_dir=str(other)))
+        == f"This run: only Hermes · Hermes folder: {other} (this run, not saved)"
+    )
+    assert (
+        _run(main(run_config_dir=str(other)))
+        == f"Claude Code folder: {other} (this run, not saved)"
+    )
+
+
+def test_typed_folders_are_stored_absolute(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "rel").mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            screen = await _open(app, pilot)
+            await _highlight(screen, pilot, "hermes")
+            await pilot.press("tab")
+            screen.query_one("#settings-path", Input).value = "rel/../rel"
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.pause()
+
+    _run(main())
+    assert _file(tmp_path)["providers"]["hermes"]["config_dir"] == str(
+        (tmp_path / "rel").resolve()
+    )
+
+
+def test_untouched_folders_keep_their_recorded_text(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    link = tmp_path / "link"
+    link.symlink_to(tmp_path / "her")
+    data = _file(tmp_path)
+    data["providers"]["hermes"]["config_dir"] = str(link)
+    _settings_file(tmp_path).write_text(json.dumps(data), encoding="utf-8")
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            screen = await _open(app, pilot)
+            await _highlight(screen, pilot, "hermes")
+            await _highlight(screen, pilot, "opencode")
+            await _highlight(screen, pilot, "claude_code")
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.pause()
+
+    _run(main())
+    assert _file(tmp_path)["providers"]["hermes"]["config_dir"] == str(link)

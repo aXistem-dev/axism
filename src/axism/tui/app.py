@@ -2111,7 +2111,13 @@ class SessionManagerApp(App[None]):
             self._show_toast(msg, success=True, seconds=4)
 
         self.push_screen(
-            SettingsScreen(self._axism_settings, session_counts=self._session_counts()),
+            SettingsScreen(
+                self._axism_settings,
+                session_counts=self._session_counts(),
+                run_provider=self._run_provider,
+                run_config_dir=self._run_config_dir,
+                run_config_agent=self._run_config_agent,
+            ),
             _after,
         )
 

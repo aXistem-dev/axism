@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Enabling an agent (in Settings or with `providers --enable`) never moves the CLI default; only `*` / `--default` does
+- Saving a folder that does not exist asks in a warning-toned dialog (`y Save anyway · n Cancel`) instead of the red delete style
+- Settings works out each agent's status in the background (`checking…` first), so it opens at once with a large session store; the statuses read `found · N sessions`, `folder missing`, `folder unreadable` or `no sessions · command not on PATH`
+- Settings notes the run's `--provider` / `--config-dir` overrides (`This run: only …`, `… folder: … (this run, not saved)`), and a typed folder is stored as an absolute path
+- A settings.json whose `providers` (or one agent's entry) is not an object counts as unreadable and is left untouched; the refusal ends with "fix or remove it, then restart aXism"
 - `r` retries session details that failed to load; the project details use the same facts style as sessions (name, agent, folder, sessions, running, size, last update), and the turns line reads `4 messages (2 prompts)`
 - The storage line says `stored in the agent's database` per session (Cursor CLI chats), not per agent
 - The reader loads the conversation in the background behind a Loading line, and Esc works meanwhile

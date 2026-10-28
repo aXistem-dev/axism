@@ -169,8 +169,14 @@ _BROKEN = '{"active_provider": "hermes", "providers": {"hermes": {"config_dir": 
 
 @pytest.mark.parametrize(
     "content",
-    [_BROKEN.encode(), b"\xff\xfe not utf-8", b"[1, 2]"],
-    ids=["syntax-error", "not-utf8", "not-an-object"],
+    [
+        _BROKEN.encode(),
+        b"\xff\xfe not utf-8",
+        b"[1, 2]",
+        b'{"providers": []}',
+        b'{"providers": {"hermes": "on"}}',
+    ],
+    ids=["syntax-error", "not-utf8", "not-an-object", "providers-list", "entry-string"],
 )
 def test_unreadable_settings_are_never_overwritten(env, content: bytes) -> None:
     path = settings_path()

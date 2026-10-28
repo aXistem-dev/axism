@@ -135,6 +135,19 @@ def _unreadable(reason: str) -> Settings:
     return settings
 
 
+def _shape_problem(data: dict[str, Any]) -> str:
+    """Why a JSON object is not a settings file ('' when its shape is fine)."""
+    providers = data.get("providers")
+    if providers is None:
+        return ""
+    if not isinstance(providers, dict):
+        return "providers is not an object"
+    for name, entry in providers.items():
+        if not isinstance(entry, dict):
+            return f"providers.{name} is not an object"
+    return ""
+
+
 def load_settings(path: Path | None = None) -> Settings:
     """Load settings from disk.
 
@@ -155,6 +168,9 @@ def load_settings(path: Path | None = None) -> Settings:
         return _unreadable("not valid JSON")
     if not isinstance(data, dict):
         return _unreadable("not a JSON object")
+    problem = _shape_problem(data)
+    if problem:
+        return _unreadable(problem)
     return Settings.from_dict(data)
 
 
