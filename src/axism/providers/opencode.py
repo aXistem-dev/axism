@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 
 from axism.actions import (
+    OPENCODE_DELETE_FAILED_PREFIX,
     STOP_ABORT_PREFIX,
     actions_failed,
     project_kept_line,
@@ -38,7 +39,7 @@ from axism.providers.opencode_store.paths import (
     short_id,
 )
 
-DELETE_FAILED_PREFIX = "error: opencode session delete"
+DELETE_FAILED_PREFIX = OPENCODE_DELETE_FAILED_PREFIX
 _UNSUPPORTED_LAYOUT = "unsupported OpenCode database layout (aXism supports OpenCode 2)"
 
 
@@ -128,7 +129,7 @@ class OpenCodeProvider(ProviderBase):
         owner = {m: top for top, members in families.items() for m in members}
         service = ops.service_info(root)
         service_pid = service.pid if service is not None else None
-        active = (ops.active_session_ids(root) & set(owner)) if use_cli else set()
+        active = ((ops.active_session_ids(root) or set()) & set(owner)) if use_cli else set()
         found = find_agent_sessions(set(owner), ops.PROCESS_NAMES)
         running = {owner[m] for m in active}
         clients: dict[str, int] = {}
@@ -152,16 +153,17 @@ class OpenCodeProvider(ProviderBase):
     def open_command(
         self, session: SessionMeta, live: LiveSession | None = None
     ) -> tuple[list[str], str | None]:
-        argv, _env = ops.open_argv(self.config_root(), session.session_id, session.cwd)
+        """The command that opens the session; a custom data folder is passed
+        through ``env XDG_DATA_HOME=...`` so the printed command opens it too."""
+        argv, env = ops.open_argv(self.config_root(), session.session_id, session.cwd)
         if not binary_on_path(ops.BINARY):
             raise FileNotFoundError(f"{ops.BINARY} not found on PATH")
+        if env:
+            argv = ["env", f"XDG_DATA_HOME={env['XDG_DATA_HOME']}", *argv]
         return argv, session.cwd or None
 
     def resume(self, session: SessionMeta, live: LiveSession | None = None) -> None:
         argv, workdir = self.open_command(session, live)
-        _argv, env = ops.open_argv(self.config_root(), session.session_id, session.cwd)
-        if env:
-            os.environ.update(env)
         exec_with_cwd(argv, workdir)
 
     # -- stop ----------------------------------------------------------------
@@ -187,8 +189,13 @@ class OpenCodeProvider(ProviderBase):
         steps: list[tuple[bool, str]] = []
         service = ops.service_info(root)
         if live.state == "running":
-            active = ops.active_session_ids(root) & set(family)
-            for sid in sorted(active) or [session_id]:
+            active = ops.active_session_ids(root)
+            # Unknown (the service did not answer): interrupt the parent so the
+            # failure is reported. Known and empty: it finished meanwhile.
+            targets = [session_id] if active is None else sorted(active & set(family))
+            if not targets:
+                steps.append((True, f"{short_id(session_id)} no longer running"))
+            for sid in targets:
                 row = oc_discover.session_row(root, sid)
                 if row is None:
                     steps.append((False, f"refused: session {short_id(sid)} not found"))

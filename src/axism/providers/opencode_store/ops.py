@@ -49,6 +49,12 @@ MOVE_NEEDS_DEFAULT_ROOT = (
     "which only runs for the default data folder"
 )
 
+# Short timeout for the quick read-only service calls made while listing and
+# checking (the app's refresh waits on them); a move poll never waits past
+# its own deadline by more than POLL_MIN_TIMEOUT.
+INFO_TIMEOUT = 5.0
+POLL_MIN_TIMEOUT = 1.0
+
 _ID_ALPHABET = string.digits + string.ascii_letters
 _ID_RANDOM_LEN = 14
 
@@ -185,6 +191,7 @@ def _api(
     *,
     params: dict[str, str] | None = None,
     data: dict | None = None,
+    timeout: float = 30.0,
 ) -> tuple[bool, object]:
     """Like :func:`api`, but a failure carries only the detail (no prefix)."""
     args = ["api", *choice.flags, method, path]
@@ -192,7 +199,7 @@ def _api(
         args += ["--param", f"{key}={value}"]
     if data is not None:
         args += ["-d", json.dumps(data)]
-    rc, out, err = _exec(choice, args)
+    rc, out, err = _exec(choice, args, timeout=timeout)
     text = out.strip()
     body: object = None
     parsed = False
@@ -248,7 +255,7 @@ def _directory_of(data: dict) -> str | None:
 
 def _service_answers(choice: ServerChoice) -> bool:
     """The server that answers ``/api/info`` is the background service checked."""
-    ok, body = _api(choice, "GET", "/api/info")
+    ok, body = _api(choice, "GET", "/api/info", timeout=INFO_TIMEOUT)
     pid = body.get("pid") if ok and isinstance(body, dict) else None
     return choice.service is not None and pid == choice.service.pid
 
@@ -295,16 +302,20 @@ def verify_session(root: Path, row: SessionRow) -> tuple[bool, str]:
     return _verify(choice, row)
 
 
-def active_session_ids(root: Path) -> set[str]:
-    """Sessions the running background service is executing (never starts it)."""
+def active_session_ids(root: Path) -> set[str] | None:
+    """Sessions the running background service is executing (never starts it).
+
+    Empty without a running service; ``None`` when the service runs but did
+    not answer, so callers can tell "nothing running" from "unknown".
+    """
     info = service_info(root)
     if info is None:
         return set()
     choice = ServerChoice(flags=[], env=None, via="service", service=info)
-    ok, body = _api(choice, "GET", "/api/session/active")
+    ok, body = _api(choice, "GET", "/api/session/active", timeout=INFO_TIMEOUT)
     data = body.get("data") if ok and isinstance(body, dict) else None
     if not isinstance(data, dict):
-        return set()
+        return None
     return {k for k in data if is_session_id(k)}
 
 
@@ -399,7 +410,9 @@ def move_session(
         return False, f"error: {BINARY} move of {short} failed: {body}"
     deadline = time.monotonic() + poll_timeout
     while True:
-        ok, body = _api(choice, "GET", f"/api/session/{row.id}")
+        remaining = deadline - time.monotonic()
+        wait = min(INFO_TIMEOUT, max(remaining, POLL_MIN_TIMEOUT))
+        ok, body = _api(choice, "GET", f"/api/session/{row.id}", timeout=wait)
         data = _session_data(body) if ok else None
         current = _directory_of(data) if data else None
         if current is not None and _same_dir(current, directory):

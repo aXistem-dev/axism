@@ -364,8 +364,31 @@ def test_active_ids_from_service(service_up: Path, cli: FakeCLI):
     assert ops.active_session_ids(service_up) == {SID, other}
     assert cli.argvs == [["opencode", "api", "GET", "/api/session/active"]]
 
+    # The service runs but could not be asked: unknown, not "nothing running".
     cli.on("GET", "/api/session/active", (1, "", "HTTP 500 Internal Server Error"))
-    assert ops.active_session_ids(service_up) == set()
+    assert ops.active_session_ids(service_up) is None
+
+
+def test_info_and_active_calls_use_the_short_timeout(service_up: Path, cli: FakeCLI):
+    assert ops.INFO_TIMEOUT == 5.0
+    cli.on("GET", "/api/session/active", (0, {"data": {}}, ""))
+    ops.active_session_ids(service_up)
+    assert cli.calls[-1]["timeout"] == ops.INFO_TIMEOUT
+    _service_ok(cli)
+    assert ops.verify_session(service_up, _row())[0]
+    info = [c for c in cli.calls if c["argv"][2:4] == ["GET", "/api/info"]]
+    assert info and all(c["timeout"] == ops.INFO_TIMEOUT for c in info)
+
+
+def test_move_poll_is_bounded_by_the_poll_budget(service_up: Path, cli: FakeCLI):
+    _move_service(service_up, cli, applied_after=None)
+    ok, _ = ops.move_session(service_up, _row(), DEST, poll_interval=0, poll_timeout=2)
+    assert not ok
+    post = next(
+        i for i, c in enumerate(cli.calls) if c["argv"][2:4] == ["POST", f"/api/session/{SID}/move"]
+    )
+    polls = [c for c in cli.calls[post + 1:] if c["argv"][2:4] == ["GET", f"/api/session/{SID}"]]
+    assert polls and all(c["timeout"] <= 2 for c in polls)
 
 
 # --- mutations ---------------------------------------------------------------------

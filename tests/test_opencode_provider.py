@@ -161,6 +161,7 @@ def test_stop_interrupt_then_client_and_failure_reporting(prov, monkeypatch):
     monkeypatch.setattr(ops, "interrupt_session", interrupt)
     monkeypatch.setattr("axism.providers.opencode.terminate_pid", term)
     live = LiveSession(A, "interactive", state="running", pid=77)
+    monkeypatch.setattr(ops, "active_session_ids", lambda r: {A})
     ok, msg = prov.stop(A, live)
     assert ok and calls == [("interrupt", A), ("term", 77, A)]
     assert "interrupted" in msg and "stopped pid 77" in msg
@@ -243,13 +244,12 @@ def test_open_argv_and_custom_root_env(prov, tmp_path, monkeypatch):
         "axism.providers.opencode.exec_with_cwd",
         lambda a, w: seen.update(argv=a, workdir=w),
     )
-    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
     # prov root is tmp/data/opencode: a custom folder named opencode
     prov.resume(sess)
-    assert "--standalone" in seen["argv"]
-    import os
-    assert os.environ["XDG_DATA_HOME"] == str(prov.config_root().parent)
-    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    assert seen["argv"][:4] == [
+        "env", f"XDG_DATA_HOME={prov.config_root().parent}", "opencode", "--standalone",
+    ]
+    assert seen["workdir"] == CWD
 
     odd = OpenCodeProvider(config_dir=tmp_path / "elsewhere")
     with pytest.raises(UnsupportedOperation):
@@ -598,3 +598,73 @@ def test_cli_move_refuses_service_running_session_without_force(prov, monkeypatc
             cli.main(argv)
         assert exc.value.code == 2
         assert "stop them first" in capsys.readouterr().err
+
+
+def test_stop_when_session_just_finished_is_a_success(prov, monkeypatch):
+    monkeypatch.setattr(ops, "service_info", lambda r: None)
+    monkeypatch.setattr(ops, "active_session_ids", lambda r: set())
+    _no_processes(monkeypatch)
+
+    def boom(*a, **k):
+        raise AssertionError("must not interrupt or signal")
+
+    monkeypatch.setattr(ops, "interrupt_session", boom)
+    monkeypatch.setattr("axism.providers.opencode.terminate_pid", boom)
+    live = LiveSession(A, "interactive", state="running", source="opencode-service")
+    ok, msg = prov.stop(A, live)
+    assert ok and msg == f"{short_id(A)} no longer running"
+    assert not actions_mod.is_failure_line(msg)
+
+    # a delete that had to stop it goes ahead
+    monkeypatch.setattr(prov, "merge_live", lambda *a, **k: {A: live})
+    monkeypatch.setattr(ops, "delete_session", lambda r, row: (True, "deleted"))
+    out = prov.execute_deletes([prov.plan_delete(A, force=True)], dry_run=False, force=True)
+    assert not actions_mod.actions_failed(out)
+
+
+def test_stop_interrupts_parent_when_running_state_is_unknown(prov, monkeypatch):
+    monkeypatch.setattr(ops, "service_info", lambda r: None)
+    monkeypatch.setattr(ops, "active_session_ids", lambda r: None)
+    _no_processes(monkeypatch)
+    seen: list = []
+    monkeypatch.setattr(
+        ops, "interrupt_session",
+        lambda root, row: seen.append(row.id) or (False, "error: service did not answer"),
+    )
+    ok, msg = prov.stop(A, LiveSession(A, "interactive", state="running"))
+    assert not ok and seen == [A] and "did not answer" in msg
+
+
+def test_merge_live_tolerates_unknown_running_state(prov, monkeypatch):
+    monkeypatch.setattr(ops, "active_session_ids", lambda r: None)
+    monkeypatch.setattr(ops, "service_info", lambda r: None)
+    _no_processes(monkeypatch, {B: 88})
+    live = prov.merge_live()
+    assert set(live) == {B} and live[B].state == "open"
+
+
+def test_kept_line_counts_failed_opencode_deletes():
+    line = actions_mod.project_kept_line(
+        3,
+        [
+            f"error: opencode session delete {short_id(A)} failed: boom",
+            f"aborted: could not stop live session ({short_id(B)})",
+            f"{short_id(C)}: deleted session",
+        ],
+        has_project_dir=False,
+    )
+    assert line.endswith("; 1 other session(s) deleted")
+
+
+def test_print_only_for_custom_root_names_the_data_folder(prov, monkeypatch, capsys):
+    _record_all_providers(prov.config_root())
+    monkeypatch.setattr("shutil.which", lambda c, *a, **k: "/bin/opencode")
+    monkeypatch.setattr(OpenCodeProvider, "merge_live", lambda self, *a, **k: {})
+    with pytest.raises(SystemExit) as exc:
+        cli.main(
+            ["resume", A, "--print-only", "--provider", "opencode",
+             "--config-dir", str(prov.config_root())]
+        )
+    assert exc.value.code == 0
+    first = capsys.readouterr().out.splitlines()[0]
+    assert f"XDG_DATA_HOME={prov.config_root().parent} opencode --standalone --session {A}" in first

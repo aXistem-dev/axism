@@ -47,4 +47,9 @@ def project_kept_line(
 
 STOP_ABORT_PREFIX = "aborted: could not stop live session"
 CLI_DELETE_FAILED_PREFIX = "error: hermes sessions delete"
-_NOT_DELETED_PREFIXES = (STOP_ABORT_PREFIX, CLI_DELETE_FAILED_PREFIX)
+OPENCODE_DELETE_FAILED_PREFIX = "error: opencode session delete"
+_NOT_DELETED_PREFIXES = (
+    STOP_ABORT_PREFIX,
+    CLI_DELETE_FAILED_PREFIX,
+    OPENCODE_DELETE_FAILED_PREFIX,
+)
