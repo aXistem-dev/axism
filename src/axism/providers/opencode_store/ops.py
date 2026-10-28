@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import shutil
 import string
@@ -62,7 +63,6 @@ _ID_RANDOM_LEN = 14
 @dataclass
 class ServiceInfo:
     pid: int
-    url: str
     version: str
 
 
@@ -77,7 +77,7 @@ class ServerChoice:
 def service_info(root: Path) -> ServiceInfo | None:
     """The running background service for the default data folder, if any.
 
-    Only ``pid``, ``url`` and ``version`` are taken from ``service.json``;
+    Only ``pid`` and ``version`` are taken from ``service.json``;
     the pid must be alive and run ``serve --service``.
     """
     if not is_default_root(root):
@@ -89,7 +89,7 @@ def service_info(root: Path) -> ServiceInfo | None:
         return None
     if not isinstance(raw, dict):
         return None
-    pid, url, version = raw.get("pid"), raw.get("url"), raw.get("version")
+    pid, version = raw.get("pid"), raw.get("version")
     del raw
     if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
         return None
@@ -100,7 +100,6 @@ def service_info(root: Path) -> ServiceInfo | None:
         return None
     return ServiceInfo(
         pid=pid,
-        url=url if isinstance(url, str) else "",
         version=version if isinstance(version, str) else "",
     )
 
@@ -365,6 +364,17 @@ def interrupt_session(root: Path, row: SessionRow) -> tuple[bool, str]:
     return True, f"interrupted {short_id(row.id)}"
 
 
+_DETAIL_PREFIX = re.compile(
+    r"^(?:error: |refused: )(?:" + BINARY + r" [a-z]+ of \S+ failed: )?"
+)
+
+
+def failure_detail(message: str) -> str:
+    """A failure line without its ``error:``/``refused:`` lead-in and the
+    ``opencode <verb> of <id> failed:`` wrapper, for callers that add their own."""
+    return _DETAIL_PREFIX.sub("", message, count=1)
+
+
 def _same_dir(a: str, b: str) -> bool:
     if os.path.normpath(a) == os.path.normpath(b):
         return True
@@ -442,6 +452,8 @@ def import_session(
     Returns ``(ok, message, new_id)``; OpenCode keeps the file's id, so a
     duplicate id is reported as a failure, never as a copy.
     """
+    if not os.path.isabs(directory):
+        return False, f"refused: import destination must be an absolute path: {directory}", ""
     try:
         choice = choose_server(root)
     except UnsupportedOperation as exc:

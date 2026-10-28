@@ -358,7 +358,8 @@ def cmd_export(args: argparse.Namespace) -> int:
         print(f"# {line}")
     print(result.message)
     if result.new_session_id:
-        print(f"new_session_id: {result.new_session_id}")
+        label = "new_session_id" if result.ok else "imported_session_id (not listed)"
+        print(f"{label}: {result.new_session_id}")
     return 0 if result.ok else 1
 
 

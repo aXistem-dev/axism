@@ -6,13 +6,12 @@ import sqlite3
 from pathlib import Path
 
 from axism.fragments import Fragment, FragmentInventory
-from axism.providers.opencode_store.discover import connect, session_row
+from axism.providers.opencode_store.discover import connect, family_map
 from axism.providers.opencode_store.paths import db_path
 
 
 def _message_bytes(root: Path, session_id: str) -> int:
-    row = session_row(root, session_id)
-    ids = [session_id] + (row.child_ids if row else [])
+    ids = [session_id, *family_map(root).get(session_id, [])]
     try:
         con = connect(db_path(root))
     except sqlite3.Error:

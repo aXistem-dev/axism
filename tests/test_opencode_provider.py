@@ -189,7 +189,7 @@ def test_stop_never_targets_service_pid(prov, monkeypatch):
     from axism.providers.opencode_store.ops import ServiceInfo
 
     monkeypatch.setattr(
-        ops, "service_info", lambda r: ServiceInfo(SERVICE_PID, "", "2.1.4")
+        ops, "service_info", lambda r: ServiceInfo(SERVICE_PID, "2.1.4")
     )
 
     def term(pid, expect=None):
@@ -366,7 +366,7 @@ def test_execute_deletes_reports_ops_failure_as_error_line(prov, monkeypatch):
     )
     out = prov.execute_deletes([plan], dry_run=False)
     assert out == [
-        f"error: opencode session delete {short_id(A)} failed: refused: different session"
+        f"error: opencode session delete {short_id(A)} failed: different session"
     ]
     assert actions_mod.actions_failed(out)
 
@@ -420,7 +420,7 @@ def test_status_note_variants(prov, tmp_path, monkeypatch):
 
     monkeypatch.setattr(ops, "service_info", lambda r: None)
     assert prov.status_note() == "database ok · service not running"
-    monkeypatch.setattr(ops, "service_info", lambda r: ServiceInfo(1, "", ""))
+    monkeypatch.setattr(ops, "service_info", lambda r: ServiceInfo(1, ""))
     assert prov.status_note() == "database ok · service running"
     assert OpenCodeProvider(config_dir=tmp_path / "none").status_note() == (
         "database not found"
@@ -501,14 +501,15 @@ def test_move_without_service_stops_nothing_and_moves_nothing(
         res = prov.move_sessions(sessions, DEST, dry_run=dry)
         assert not res.ok
         assert res.message == ops.MOVE_NEEDS_DEFAULT_ROOT  # custom root
-        assert res.actions == [ops.MOVE_NEEDS_DEFAULT_ROOT]
+        assert res.actions == []
     res = prov.move_projects(prov.discover(), DEST)
-    assert not res.ok and res.actions == [ops.MOVE_NEEDS_DEFAULT_ROOT]
+    assert not res.ok and res.message == ops.MOVE_NEEDS_DEFAULT_ROOT
+    assert res.actions == []
 
     default = OpenCodeProvider()  # default data folder
     res = default.move_sessions(sessions, DEST)
     assert res.message == ops.MOVE_NEEDS_SERVICE
-    assert res.actions == [ops.MOVE_NEEDS_SERVICE]
+    assert res.actions == []
 
 
 def test_live_child_makes_parent_live_and_blocks_delete(prov, monkeypatch):
@@ -668,3 +669,46 @@ def test_print_only_for_custom_root_names_the_data_folder(prov, monkeypatch, cap
     assert exc.value.code == 0
     first = capsys.readouterr().out.splitlines()[0]
     assert f"XDG_DATA_HOME={prov.config_root().parent} opencode --standalone --session {A}" in first
+
+
+def test_delete_failure_does_not_repeat_the_prefix(prov, monkeypatch):
+    monkeypatch.setattr(prov, "merge_live", lambda *a, **k: {})
+    plan = prov.plan_delete(A)
+    detail = "Session not found: x"
+    for msg in (
+        f"error: opencode delete of {short_id(A)} failed: {detail}",
+        f"refused: {detail}",
+    ):
+        monkeypatch.setattr(ops, "delete_session", lambda r, row, m=msg: (False, m))
+        (line,) = prov.execute_deletes([plan], dry_run=False)
+        assert line == f"error: opencode session delete {short_id(A)} failed: {detail}"
+        assert line.count("error") == 1 and line.count("failed") == 1
+
+
+def test_refused_move_prints_once_on_the_cli(prov, capsys, monkeypatch):
+    _record_all_providers(prov.config_root())
+    monkeypatch.setattr(OpenCodeProvider, "merge_live", lambda self, *a, **k: {})
+    monkeypatch.setattr(ops, "service_info", lambda r: None)
+    with pytest.raises(SystemExit):
+        cli.main(["move", A, "--to", DEST, "--provider", "opencode",
+                  "--config-dir", str(prov.config_root())])
+    out = capsys.readouterr().out
+    assert out.count(ops.MOVE_NEEDS_SERVICE) + out.count(ops.MOVE_NEEDS_DEFAULT_ROOT) == 1
+
+
+def test_delete_preview_shows_stored_size_and_keeps_the_file(prov, monkeypatch, capsys):
+    monkeypatch.setattr(prov, "merge_live", lambda *a, **k: {})
+    plan = prov.plan_delete(A)
+    stored = plan.inventory.fragments[0].size_bytes
+    assert stored > 0
+    text = "\n".join(plan.summary_lines())
+    assert "Bytes: 0" not in text
+    assert f"stored in the agent's database ({stored} B;" in text
+    assert "the database file stays" in text
+
+    from axism.tui.app import _format_session_delete_confirm
+
+    sess = prov.find_session(A)[1]
+    body, _ = _format_session_delete_confirm([sess], [plan], [], prov)
+    assert "the database file stays" in str(body)
+    assert f"{stored} B" in str(body)

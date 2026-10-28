@@ -141,7 +141,7 @@ def test_service_info_requires_live_serve_process(
     monkeypatch.setattr(ops, "read_cmdline", lambda pid: SERVICE_CMD)
     info = ops.service_info(oc_root)
     assert info == ops.ServiceInfo(
-        pid=SERVICE_PID, url="http://127.0.0.1:4096", version="2.1.4"
+        pid=SERVICE_PID, version="2.1.4"
     )
     assert "synthetic-placeholder-value" not in repr(info)
     assert not hasattr(info, "password")
@@ -889,3 +889,28 @@ def test_can_move_only_through_the_service(
     assert ops.can_move(tmp_path / "opencode") is False  # custom root
     assert "only runs for the default data folder" in ops.MOVE_NEEDS_DEFAULT_ROOT
     assert ops.MOVE_NEEDS_DEFAULT_ROOT.startswith("refused: ")
+
+
+def test_service_info_has_no_url_field():
+    assert not hasattr(ops.ServiceInfo(1, "2"), "url")
+
+
+def test_import_refuses_a_relative_directory(tmp_path: Path, oc_root: Path, cli: FakeCLI):
+    transfer = tmp_path / "transfer.json"
+    transfer.write_text("{}")
+    ok, msg, new_id = ops.import_session(oc_root, transfer, "rel/dir", session_id=SID)
+    assert (ok, new_id) == (False, "")
+    assert msg.startswith("refused: ") and is_failure_line(msg)
+    assert cli.calls == []
+
+
+def test_move_poll_timeout_follows_the_remaining_budget(service_up: Path, cli: FakeCLI):
+    _move_service(service_up, cli, applied_after=None)
+    ops.move_session(service_up, _row(), DEST, poll_interval=0, poll_timeout=0)
+    polls = [c for c in cli.calls if c["argv"][2:4] == ["GET", f"/api/session/{SID}"]][1:]
+    assert polls and all(c["timeout"] == ops.POLL_MIN_TIMEOUT for c in polls)
+    cli.calls.clear()
+    ops.move_session(service_up, _row(), DEST, poll_interval=0, poll_timeout=3)
+    polls = [c for c in cli.calls if c["argv"][2:4] == ["GET", f"/api/session/{SID}"]][1:]
+    assert polls[0]["timeout"] > ops.POLL_MIN_TIMEOUT
+    assert all(c["timeout"] <= 3 for c in polls)

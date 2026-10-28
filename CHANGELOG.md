@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- OpenCode sub-agents are folded recursively: a session's size and sub-agent count include grandchildren
+- The delete preview for database-backed agents (OpenCode, Hermes) shows the session's stored size instead of `Bytes: 0`, saying that only the session's rows are removed through the agent and the database file stays
+- A refused OpenCode move prints its refusal once; a failed OpenCode delete no longer repeats the `error:` prefix
+- A failed copy into OpenCode prints a leftover session as `imported_session_id (not listed)`; an OpenCode import refuses a relative destination folder
+- Hermes conversations with structured (JSON) message content show and copy their text parts
 - Enabling an agent (in Settings or with `providers --enable`) never moves the CLI default; only `*` / `--default` does
 - Saving a folder that does not exist asks in a warning-toned dialog (`y Save anyway · n Cancel`) instead of the red delete style
 - Settings works out each agent's status in the background (`checking…` first), so it opens at once with a large session store; the statuses read `found · N sessions`, `folder missing`, `folder unreadable` or `no sessions · command not on PATH`

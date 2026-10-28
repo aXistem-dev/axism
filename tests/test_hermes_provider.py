@@ -461,3 +461,36 @@ def test_project_delete_reports_how_many_other_sessions_went(
         "aborted: a live session could not be stopped; "
         f"{total - 1} other session(s) deleted"
     ) in actions
+
+
+def test_transcript_extracts_text_from_structured_content(
+    hermes_env: tuple[Path, str]
+):
+    import json
+
+    from axism.providers.hermes_store import discover as hermes_discover
+
+    root, _ = hermes_env
+    con = sqlite3.connect(state_db(root))
+    with con:
+        rows = [
+            ("user", json.dumps([{"type": "text", "text": "part one"},
+                                 {"type": "image", "url": "x"},
+                                 {"type": "text", "content": "part two"}])),
+            ("assistant", json.dumps({"content": "structured answer"})),
+            ("user", json.dumps([{"type": "image", "url": "x"}])),
+            ("user", "[draft] not json"),
+        ]
+        con.executemany(
+            "INSERT INTO messages (session_id, role, content, timestamp)"
+            " VALUES (?, ?, ?, 500.0)",
+            [(TUI_SESSION, r, c) for r, c in rows],
+        )
+    con.close()
+    turns = hermes_discover.transcript_turns(root, TUI_SESSION)
+    assert turns == [
+        ("user", "  tui   prompt  text "),
+        ("user", "part one\npart two"),
+        ("assistant", "structured answer"),
+        ("user", "[draft] not json"),
+    ]

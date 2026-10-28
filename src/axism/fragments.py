@@ -90,6 +90,23 @@ class FragmentInventory:
     def deletable(self) -> list[Fragment]:
         return [f for f in self.fragments if not f.is_protected()]
 
+    def stored_rows_note(self) -> str | None:
+        """For database-backed agents: where the session's size sits.
+
+        The session's rows are removed through the agent; the protected
+        database file itself is never a removal target.
+        """
+        rows = next(
+            (f for f in self.fragments if f.kind == "session_rows" and f.is_protected()),
+            None,
+        )
+        if rows is None:
+            return None
+        return (
+            f"stored in the agent's database ({rows.size_bytes} B; "
+            "removed through the agent, the database file stays)"
+        )
+
 
 def _add_if_exists(
     out: list[Fragment], kind: str, path: Path, *, optional: bool = False

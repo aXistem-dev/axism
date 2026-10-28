@@ -32,8 +32,12 @@ class DeletePlan:
         lines = [
             f"Session: {self.session_id}",
             f"Fragments: {len(self.inventory.deletable)}",
-            f"Bytes: {self.inventory.total_bytes}",
         ]
+        stored = self.inventory.stored_rows_note()
+        if stored is None or self.inventory.deletable:
+            lines.append(f"Bytes: {self.inventory.total_bytes}")
+        if stored is not None:
+            lines.append(f"Stored: {stored}")
         if self.blocked_reason:
             lines.append(f"BLOCKED: {self.blocked_reason}")
         if self.live:

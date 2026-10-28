@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from axism.actions import (
     CLI_DELETE_FAILED_PREFIX,
@@ -31,6 +32,9 @@ from axism.providers.hermes_store import discover as hermes_discover
 from axism.providers.hermes_store import fragments as hermes_fragments
 from axism.providers.hermes_store import ops as hermes_ops
 from axism.providers.hermes_store.paths import hermes_home, state_db
+
+if TYPE_CHECKING:
+    from axism.providers.transfer import Turn
 
 # Hermes chats run as ``python -c … hermes_cli/main.py …``: no ``hermes`` token.
 HERMES_MARKERS = ("hermes_cli/main.py", "hermes_cli.main")
@@ -149,7 +153,7 @@ class HermesProvider(ProviderBase):
             self.config_root(), session_id, project_slug=project_slug
         )
 
-    def transcript(self, session: SessionMeta):
+    def transcript(self, session: SessionMeta) -> list[Turn]:
         """Read-only straight from state.db (no CLI process)."""
         from axism.providers.transfer import Turn
 

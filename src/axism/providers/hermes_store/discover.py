@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
@@ -175,6 +176,29 @@ def session_exists(root: Path, session_id: str) -> bool:
     return row is not None
 
 
+def _text_parts(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if isinstance(value, list):
+        return [t for item in value for t in _text_parts(item)]
+    if isinstance(value, dict):
+        for key in ("text", "content"):
+            if key in value:
+                return _text_parts(value[key])
+    return []
+
+
+def _structured_text(content: str) -> str:
+    """Plain text, or the text parts of JSON content (empty when it has none)."""
+    if content.lstrip()[:1] not in ("{", "["):
+        return content
+    try:
+        data = json.loads(content)
+    except ValueError:
+        return content
+    return "\n".join(_text_parts(data)).strip()
+
+
 def transcript_turns(root: Path, session_id: str) -> list[tuple[str, str]] | None:
     """``(role, text)`` for user/assistant messages, oldest first (read-only).
 
@@ -197,4 +221,11 @@ def transcript_turns(root: Path, session_id: str) -> list[tuple[str, str]] | Non
         return None
     finally:
         con.close()
-    return [(r[0], r[1]) for r in rows if isinstance(r[1], str) and r[1].strip()]
+    turns: list[tuple[str, str]] = []
+    for role, content in rows:
+        if not isinstance(content, str) or not content.strip():
+            continue
+        text = _structured_text(content)
+        if text:
+            turns.append((role, text))
+    return turns

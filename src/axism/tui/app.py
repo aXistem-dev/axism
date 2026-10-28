@@ -495,9 +495,15 @@ def _format_session_delete_confirm(
             live_bit = f"  ·  live {live.kind}/{live.state}"
             if live.pid is not None:
                 live_bit += f" pid={live.pid}"
+        stored = plan.inventory.stored_rows_note()
+        size_bit = (
+            stored
+            if stored is not None and not nfrag
+            else _fmt_size(plan.inventory.total_bytes)
+        )
         lines.append(
             Content(
-                f"  {s.session_id[:8]}…  {_fmt_size(plan.inventory.total_bytes)}"
+                f"  {s.session_id[:8]}…  {size_bit}"
                 f"  {nfrag} fragments{live_bit}"
             )
         )

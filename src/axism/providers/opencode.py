@@ -267,7 +267,7 @@ class OpenCodeProvider(ProviderBase):
                 if is_default_root(root)
                 else ops.MOVE_NEEDS_DEFAULT_ROOT
             )
-            return MoveResult(False, refusal, actions=[refusal], dest_cwd=dest_cwd)
+            return MoveResult(False, refusal, dest_cwd=dest_cwd)
         live_map = self.merge_live(root)
         actions: list[str] = []
         moved = unchanged = 0
@@ -411,7 +411,7 @@ class OpenCodeProvider(ProviderBase):
                 continue
             ok, msg = ops.delete_session(root, row)
             if not ok:
-                actions.append(f"{DELETE_FAILED_PREFIX} {short} failed: {msg}")
+                actions.append(f"{DELETE_FAILED_PREFIX} {short} failed: {ops.failure_detail(msg)}")
                 continue
             actions.append(f"{short}: {msg}")
         return actions

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from axism.fragments import Fragment
@@ -216,3 +217,35 @@ def test_family_map_walks_whole_descendant_tree(tmp_path):
     fam = discover.family_map(tmp_path)
     assert fam == {"ses_t1": ["ses_g1", "ses_k1"], "ses_t2": []}
     assert discover.family_map(tmp_path / "none") == {}
+
+
+def _tree_db(root: Path):
+    def s(i, parent):
+        return {"id": i, "project_id": "p1", "parent_id": parent,
+                "directory": "/home/alice/one", "title": i,
+                "time_created": 1, "time_updated": 2}
+
+    def m(i, n):
+        return {"session_id": i, "type": "user", "seq": 1, "data": {"text": "x" * n}}
+
+    make_opencode_db(
+        root,
+        sessions=[s("ses_t1", None), s("ses_k1", "ses_t1"), s("ses_g1", "ses_k1")],
+        projects=[{"id": "p1", "worktree": "/home/alice/one"}],
+        messages=[m("ses_t1", 10), m("ses_k1", 20), m("ses_g1", 40)],
+    )
+
+
+def test_subagents_are_folded_recursively(tmp_path):
+    _tree_db(tmp_path)
+    (proj,) = discover.discover_all(tmp_path)
+    (sess,) = proj.sessions
+    own = discover.session_row(tmp_path, "ses_t1")
+    assert sess.subagent_count == 2
+    base = sess.size_bytes - sum(
+        len(json.dumps({"text": "x" * n})) for n in (20, 40)
+    )
+    assert base == len(json.dumps({"text": "x" * 10}))
+    inv = fragments.collect_fragments(tmp_path, "ses_t1")
+    assert inv.fragments[0].size_bytes == sess.size_bytes
+    assert own is not None and own.child_ids == ["ses_k1"]

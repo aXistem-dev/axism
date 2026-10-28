@@ -84,6 +84,21 @@ def _text_of(msg_type: str, raw: object) -> str | None:
     return None
 
 
+def _descendants(children: dict[str, list[str]], top: str) -> list[str]:
+    """Every sub-agent below ``top`` (children, grandchildren, …)."""
+    seen: set[str] = {top}
+    out: list[str] = []
+    todo = list(children.get(top, []))
+    while todo:
+        cur = todo.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        out.append(cur)
+        todo.extend(children.get(cur, []))
+    return out
+
+
 def discover_all(root: Path) -> list[ProjectInfo]:
     """Top-level sessions grouped by ``project_id``."""
     if layout_status(root) != "ok":
@@ -155,7 +170,7 @@ def discover_all(root: Path) -> list[ProjectInfo]:
                 path=db,
             )
             projects[pid] = info
-        kids = children.get(sid, [])
+        kids = _descendants(children, sid)
         title = row["title"]
         info.sessions.append(
             SessionMeta(
