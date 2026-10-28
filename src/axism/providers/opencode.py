@@ -16,6 +16,7 @@ from axism.actions import (
     project_kept_line,
 )
 from axism.delete import DeletePlan, ProjectDeletePlan
+from axism.details import SessionDetails
 from axism.discover import ProjectInfo, SessionMeta
 from axism.fragments import FragmentInventory
 from axism.live import LiveSession
@@ -231,6 +232,16 @@ class OpenCodeProvider(ProviderBase):
             return row
         found = self.find_session(session_id)
         return oc_discover.session_row(root, found[1].session_id) if found else None
+
+    def session_details(self, session: SessionMeta) -> SessionDetails:
+        details = super().session_details(session)
+        usage = oc_discover.session_usage(self.config_root(), session.session_id)
+        details.created = usage.get("created")  # type: ignore[assignment]
+        details.model = usage.get("model")  # type: ignore[assignment]
+        details.cost_usd = usage.get("cost_usd")  # type: ignore[assignment]
+        details.tokens_in = usage.get("tokens_in")  # type: ignore[assignment]
+        details.tokens_out = usage.get("tokens_out")  # type: ignore[assignment]
+        return details
 
     def rename(self, session_id: str, title: str) -> tuple[bool, str]:
         row = self._row(session_id)

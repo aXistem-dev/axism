@@ -291,3 +291,81 @@ def transcript_turns(root: Path, session_id: str) -> list[tuple[str, str]]:
         if text:
             turns.append((row["type"], text))
     return turns
+
+
+def _model_name(raw: object) -> str | None:
+    """Short ``provider/model-id`` from the ``model`` column (JSON or plain text)."""
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return None
+        if text[0] not in "{[":
+            return text
+        try:
+            raw = json.loads(text)
+        except ValueError:
+            return None
+    if not isinstance(raw, dict):
+        return None
+
+    def pick(*keys: str) -> str | None:
+        for key in keys:
+            val = raw.get(key)  # type: ignore[union-attr]
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+        return None
+
+    model = pick("id", "modelID", "model_id", "model")
+    if model is None:
+        return None
+    provider = pick("providerID", "provider_id", "provider")
+    if provider and not model.startswith(provider + "/"):
+        return f"{provider}/{model}"
+    return model
+
+
+def _num(value: object, kind: type) -> int | float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return kind(value)
+
+
+def session_usage(root: Path, session_id: str) -> dict[str, object]:
+    """Created time, model, cost and tokens recorded for one session.
+
+    Missing columns or an unreadable database yield an empty dict.
+    """
+    if layout_status(root) != "ok":
+        return {}
+    try:
+        con = connect(db_path(root))
+    except sqlite3.Error:
+        return {}
+    try:
+        cols = _columns(con, "session_v2")
+        wanted = [
+            c
+            for c in ("time_created", "model", "cost", "tokens_input", "tokens_output")
+            if c in cols
+        ]
+        row = con.execute(
+            f"SELECT {', '.join(wanted)} FROM session_v2 WHERE id = ?",
+            (session_id,),
+        ).fetchone()
+    except sqlite3.Error:
+        return {}
+    finally:
+        con.close()
+    if row is None:
+        return {}
+    data = dict(zip(wanted, row, strict=True))
+    out: dict[str, object] = {}
+    created = _num(data.get("time_created"), float)
+    if created:
+        out["created"] = created / 1000.0
+    if "model" in data:
+        out["model"] = _model_name(data["model"])
+    out["cost_usd"] = _num(data.get("cost"), float)
+    out["tokens_in"] = _num(data.get("tokens_input"), int)
+    out["tokens_out"] = _num(data.get("tokens_output"), int)
+    return out

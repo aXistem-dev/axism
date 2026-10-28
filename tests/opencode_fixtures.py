@@ -16,6 +16,8 @@ SESSION_COLS = (
     "time_updated",
     "time_archived",
 )
+# Optional per-session usage columns; created only when a session row sets one.
+USAGE_COLS = ("model", "cost", "tokens_input", "tokens_output")
 MESSAGE_COLS = ("session_id", "type", "seq", "data")
 PROJECT_COLS = ("id", "worktree")
 
@@ -44,6 +46,8 @@ def make_opencode_db(
             "session_message": messages,
             "project": projects,
         }
+        if any(c in row for row in sessions for c in USAGE_COLS):
+            specs["session_v2"] = SESSION_COLS + USAGE_COLS
         for table, cols in specs.items():
             kept = [c for c in cols if c not in drop.get(table, set())]
             con.execute(f"CREATE TABLE {table} ({', '.join(kept)})")
@@ -51,7 +55,9 @@ def make_opencode_db(
                 values = []
                 for c in kept:
                     v = row.get(c)
-                    if c == "data" and not isinstance(v, (str, type(None))):
+                    if c in ("data", "model") and not isinstance(
+                        v, (str, int, float, type(None))
+                    ):
                         v = json.dumps(v)
                     values.append(v)
                 marks = ", ".join("?" for _ in kept)

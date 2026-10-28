@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from axism.delete import (
@@ -12,6 +13,7 @@ from axism.delete import (
     execute_deletes,
     execute_project_delete,
 )
+from axism.details import SessionDetails
 from axism.discover import ProjectInfo, SessionMeta, discover_all, find_session
 from axism.fragments import FragmentInventory, collect_fragments
 from axism.live import (
@@ -28,6 +30,32 @@ from axism.paths import config_root as claude_config_root
 from axism.providers.base import Capabilities, ProviderBase
 from axism.providers.common import binary_on_path, dir_has_content
 from axism.rename import rename_session
+
+
+def _last_model(path: Path) -> str | None:
+    """``message.model`` of the last assistant record that has one (read-only)."""
+    model: str | None = None
+    try:
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if '"model"' not in line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                msg = obj.get("message") if isinstance(obj, dict) else None
+                if (
+                    isinstance(obj, dict)
+                    and obj.get("type") == "assistant"
+                    and isinstance(msg, dict)
+                    and isinstance(msg.get("model"), str)
+                    and msg["model"].strip()
+                ):
+                    model = msg["model"].strip()
+    except OSError:
+        return None
+    return model
 
 
 class ClaudeCodeProvider(ProviderBase):
@@ -56,6 +84,12 @@ class ClaudeCodeProvider(ProviderBase):
             self._config_dir = None
         else:
             self._config_dir = Path(config_dir).expanduser()
+
+    def session_details(self, session: SessionMeta) -> SessionDetails:
+        details = super().session_details(session)
+        if session.transcript_path.is_file():
+            details.model = _last_model(session.transcript_path)
+        return details
 
     def detect(self) -> bool:
         try:

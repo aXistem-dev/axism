@@ -10,14 +10,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from axism.delete import DeletePlan, ProjectDeletePlan
+from axism.details import SessionDetails, TranscriptUnavailable
 from axism.discover import ProjectInfo, SessionMeta
 from axism.fragments import FragmentInventory
 from axism.ids import match_session_id
 from axism.live import LiveSession
 from axism.move import MoveResult
+
+if TYPE_CHECKING:
+    from axism.providers.transfer import Turn
 
 
 class UnsupportedOperation(RuntimeError):
@@ -167,6 +171,14 @@ class SessionProvider(Protocol):
     ) -> tuple[int, str]:
         ...
 
+    def transcript(self, session: SessionMeta) -> list[Turn]:
+        """Text turns of the conversation; raises ``TranscriptUnavailable``."""
+        ...
+
+    def session_details(self, session: SessionMeta) -> SessionDetails:
+        """Facts, first/last prompt and last reply; never raises."""
+        ...
+
 
 class ProviderBase:
     """Default implementations that refuse unsupported operations.
@@ -307,3 +319,30 @@ class ProviderBase:
         self, path: str | None = None, *, dry_run: bool = True, all_projects: bool = False
     ) -> tuple[int, str]:
         return 1, f"{self.label} has no project purge command"
+
+    def transcript(self, session: SessionMeta) -> list[Turn]:
+        # Imported lazily: transfer imports the provider modules.
+        from axism.providers import transfer
+
+        try:
+            canonical = transfer.export_session(self, session)
+        except Exception as exc:
+            raise TranscriptUnavailable(f"Cannot read conversation: {exc}") from exc
+        if canonical.export_error:
+            raise TranscriptUnavailable(canonical.export_error)
+        return canonical.turns
+
+    def session_details(self, session: SessionMeta) -> SessionDetails:
+        details = SessionDetails()
+        try:
+            turns = self.transcript(session)
+        except TranscriptUnavailable as exc:
+            details.note = exc.reason
+            return details
+        details.turns = len(turns)
+        users = [t.content for t in turns if t.role == "user"]
+        replies = [t.content for t in turns if t.role == "assistant"]
+        details.first_prompt = users[0] if users else None
+        details.last_prompt = users[-1] if users else None
+        details.last_reply = replies[-1] if replies else None
+        return details
