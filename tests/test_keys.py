@@ -167,3 +167,54 @@ def test_find_unknown_action_raises():
 )
 def test_key_display(key, shown):
     assert keys.key_display(key) == shown
+
+
+README_ACTIONS = {
+    "Down": "cursor_down",
+    "Up": "cursor_up",
+    "First row": "cursor_first",
+    "Last row": "cursor_last",
+    "Half page down": "half_page_down",
+    "Half page up": "half_page_up",
+    "Pane left": "pane_left",
+    "Pane right": "pane_right",
+    "Next pane": "next_pane",
+    "Back": "back",
+    "Mark or unmark": "toggle_select",
+    "Mark all": "select_all",
+    "Clear all marks": "clear_select",
+    "Open the session in its agent": "resume_session",
+    "Stop a running session": "stop_sessions",
+    "Rename a session": "rename_session",
+    "Move to another project path": "move_items",
+    "Delete": "delete_items",
+    "Filter sessions": "focus_session_filter",
+    "Sort sessions": "cycle_session_sort",
+    "Settings": "show_settings",
+    "All keys": "show_help",
+    "Command palette: run any action by name": "command_palette",
+}
+
+
+def test_readme_key_table_matches_registry():
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+    section = text.split("## Using the app", 1)[1].split("Capital letters", 1)[0]
+    rows = [ln for ln in section.splitlines() if ln.startswith("| `")]
+    assert rows
+    by_prefix = {
+        "Go into": ["enter_pane"],
+        "Quit": ["quit"],
+        "Pick a theme": ["pick_theme", "next_theme"],
+    }
+    for line in rows:
+        _, key_cell, action_cell, *_ = (c.strip() for c in line.split("|"))
+        shown = [k.strip("`") for k in key_cell.split(" / ")]
+        ids = [README_ACTIONS[action_cell]] if action_cell in README_ACTIONS else next(
+            v for p, v in by_prefix.items() if action_cell.startswith(p)
+        )
+        # Esc is bound to several "back" actions; any of the named ones may carry it.
+        bound = {keys.key_display(k) for i in ids for k in keys.find(i).keys}
+        for name in shown:
+            assert name in bound, (name, ids)

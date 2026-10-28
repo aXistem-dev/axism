@@ -42,29 +42,48 @@ axism list       # print every session, grouped by project
 axism providers  # show which agents are enabled and where aXism looks for them
 ```
 
-The app has three panes: **projects**, **sessions**, and **details**. Use `Tab` or the arrow keys to switch panes, `↑`/`↓` to pick an item, and press `?` to see every key.
+The app has three panes: **projects**, **sessions**, and **details**. Move with the arrow keys or vim keys, and press `?` to see every key.
 
 ## Using the app
 
 | Key | Action |
 |-----|--------|
-| `Tab` / `←` `→` | Switch pane |
-| `Space` / `a` / `c` | Mark one, mark all, clear all marks |
+| `j` / `↓` | Down |
+| `k` / `↑` | Up |
+| `g` / `Home` | First row |
+| `G` / `End` | Last row |
+| `Ctrl+D` | Half page down |
+| `Ctrl+U` | Half page up |
+| `h` / `←` | Pane left |
+| `l` / `→` | Pane right |
+| `Tab` | Next pane |
+| `Enter` | Go into the highlighted item: projects, sessions, details, then the reader |
+| `Esc` | Back |
+| `Space` | Mark or unmark |
+| `a` | Mark all |
+| `c` | Clear all marks |
 | `o` | Open the session in its agent |
 | `s` | Stop a running session |
 | `n` | Rename a session |
 | `m` | Move to another project path |
-| `d` | Delete |
-| `/` / `.` | Filter / sort sessions |
+| `d` / `Del` | Delete |
+| `/` | Filter sessions |
+| `.` | Sort sessions |
 | `,` | Settings |
-| `?` or `h` | All keys (refresh, themes, version info, and more) |
-| `q` | Quit |
+| `t` / `T` | Pick a theme / next theme |
+| `Ctrl+P` | Command palette: run any action by name |
+| `?` | All keys |
+| `q` | Quit (asks first if items are marked) |
+
+Capital letters do the same as lowercase, except `G` (last row) and `T` (next theme). The footer follows the pane you are in: keys that do not apply there are dimmed, and pressing one tells you why it does nothing.
+
+The details pane shows the session's facts first, then its last prompt and last reply. `Enter` on the details pane opens the reader with the full conversation (text turns only); `Esc` or `q` returns. Dialogs fit small terminals and scroll when the text is longer than the window.
 
 Terminals narrower than 70 columns hide the details pane so projects and sessions both fit. Keys act on the pane you are in. For example, `d` in the projects pane deletes whole projects, while `d` in the sessions pane deletes sessions. If items are marked, the action applies to all of them. If an agent cannot do something, aXism tells you instead of doing half the job.
 
 **Moving.** Press `m`, then pick an existing project or type a folder path. Within the same agent, aXism moves the session files and updates their recorded paths. It creates the destination folder if needed, but it never moves your source code. Stop running sessions before moving them. Moving a session into another agent's project copies the conversation text and keeps the original.
 
-**Settings.** Press `,` to choose which agents to include (`Space`), set the default agent for CLI commands (`Enter` saves and makes the highlighted one the default), and point an agent at a custom config folder. On first launch aXism switches on the agents it finds on the machine (a data folder with content, or the agent's command on your `PATH`); agents added by a later update are detected once, and your own choices are kept. Settings are saved in `~/.config/axism/settings.json` (or under `$AXISM_CONFIG_DIR`); a settings file that cannot be read is left untouched, and the detected agents are used for that run only.
+**Settings.** Press `,` to choose which agents to include (`Space`), set the default agent for CLI commands (`*` makes the highlighted one the default, `Enter` saves), and point an agent at a custom config folder. Each agent shows its status (sessions found, folder missing, or command not installed), and saving warns about a configured folder that does not exist. On first launch aXism switches on the agents it finds on the machine (a data folder with content, or the agent's command on your `PATH`); agents added by a later update are detected once, and your own choices are kept. Settings are saved in `~/.config/axism/settings.json` (or under `$AXISM_CONFIG_DIR`); a settings file that cannot be read is left untouched, and the detected agents are used for that run only.
 
 ## Command line
 
@@ -82,11 +101,14 @@ Everything the app does is also available as a command, which is handy for scrip
 | `delete ID...` | Delete sessions |
 | `delete-project PATH` | Delete a project and its sessions (give a slug as `delete-project -- -home-alice-src-demo`) |
 | `purge-project PATH` | Run Claude Code's own project purge |
+| `providers [--default ID] [--enable ID] [--disable ID]` | Show the agents; change which are enabled and which is the CLI default |
+| `tui [--provider ID] [--config-dir PATH]` | Open the app; the options apply to that run only |
 
 A few things worth knowing:
 
 - Session IDs can be shortened to any unique prefix.
 - `delete`, `delete-project`, `purge-project`, and `stop` only show a preview until you add `--yes`. `delete` and `delete-project` exit 1 after that bare preview, 0 after an explicit `--dry-run` or a `--yes` run that completed, 1 as well when a `--yes` run reported an aborted, refused or failed step, and 2 whenever the plan is blocked (not found, or a live session without `--force`). `move` and `export` take `--dry-run` to preview; `move` refuses sessions that are running unless you pass `--force`.
+- `axism providers` marks the CLI default agent with `*` and prints a legend line below the list.
 - `list` covers every enabled agent. Other commands use the default agent (Claude Code unless you change it), so add `--provider cursor`, `--provider hermes`, or `--provider opencode` to work on those sessions.
 
 ```bash
@@ -122,7 +144,7 @@ All four agents support open, stop, rename, and delete. Differences:
 
 Deleting a session never removes credentials (`auth.json`, `.credentials.json`, `.env`), agent config (`settings.json`, `config.yaml`, `cli-config.json`), skills, plugins, daemon keys, project `memory/`, or an agent's whole database (such as Hermes `state.db` or OpenCode `opencode.db`).
 
-Deleting a project removes every session in it along with the agent's folder for that project. For Claude Code that includes the project's `memory/` unless you pass `--keep-memory`; in the app, the project delete dialog states what happens to `memory/` and `k` toggles keeping it (off by default).
+Deleting a project removes every session in it along with the agent's folder for that project. For Claude Code that includes the project's `memory/` unless you pass `--keep-memory`; in the app, the project delete dialog states what happens to `memory/` and `m` toggles keeping it (off by default).
 
 ## Development
 

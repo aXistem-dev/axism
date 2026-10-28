@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] — 2026-10-28
 
-OpenCode 2 joins Claude Code, Cursor and Hermes as a fourth agent, and aXism switches on the agents it finds installed instead of all of them.
+OpenCode 2 joins Claude Code, Cursor and Hermes as a fourth agent, aXism switches on the agents it finds installed instead of all of them, and the keyboard, footer, help, details pane and Settings are reworked.
 
 ### Added
 
@@ -20,9 +20,20 @@ OpenCode 2 joins Claude Code, Cursor and Hermes as a fourth agent, and aXism swi
 - Copy sessions from OpenCode to Claude Code, Cursor and Hermes, and into OpenCode through `opencode session import` (the copy gets a new session id), text turns only, title kept
 - A custom OpenCode data folder in Settings or with `--config-dir`; it must be named `opencode` for changes to work, and the command that opens one of its sessions (`axism resume --print-only`) sets `XDG_DATA_HOME` to its parent folder
 - `axism providers` shows whether the OpenCode database was found and supported and whether its background service is running; an unsupported (non-OpenCode 2) layout is reported in one line
+- Vim keys (`j`/`k`, `h`/`l`, `g`/`G`, `Ctrl+D`/`Ctrl+U`) next to the arrows, `PgUp`/`PgDn`, `Home`/`End`, and `Del` for delete; capital letters do the same as lowercase, except `G` (last row) and `T` (next theme)
+- `Ctrl+P` opens a command palette that runs any action by name
+- `Enter` goes into the highlighted item (projects, sessions, details) and opens a full-screen reader with the whole conversation (text turns only) from the details pane; `Esc` goes back
+- The details pane shows a session's facts first, then its last prompt and last reply
+- A footer that follows the focused pane, dims keys that do not apply there, and says why when you press one
+- A help screen (`?`) generated from the same key list the app uses, so it always matches what the keys do
+- Settings: `Space` switches an agent on or off, `*` makes it the CLI default, `Enter` saves; each agent shows its status (sessions found, folder missing, command not installed) and saving warns about a folder that does not exist
+- `axism providers --default`, `--enable` and `--disable` change the agents and the CLI default, and the list marks the default with `*` and a legend line
 
 ### Changed
 
+- `?` opens the help (`h` moves to the pane on the left); `q` asks before dropping marks
+- Dialogs fit small terminals and scroll when their text is longer than the window
+- `axism tui --provider` and `--config-dir` apply to that run only
 - Agents without a saved choice are detected once (data folder with content, or the command on `PATH`) and switched on or off accordingly, instead of all being switched on; saved choices are never changed, and Claude Code is shown if no agent ends up switched on. The note names the agents found and the ones not detected (in the app as a message, on stderr for other commands); a `settings.json` that cannot be read is never overwritten, and the detected choices then apply to that run only
 - GitHub releases use this changelog's section for the version as their release notes
 

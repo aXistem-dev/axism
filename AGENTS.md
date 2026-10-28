@@ -17,7 +17,7 @@
 4. **Go through the provider** — TUI and CLI call `SessionProvider` methods only. Never import `discover` / `live` / `rename` / `move` / `delete` / `fragments` directly from `cli.py` or `tui/app.py`; those are Claude Code's implementation, wrapped by `ClaudeCodeProvider`.
 5. **Unsupported means explicit** — declare it in `Capabilities`, then raise `UnsupportedOperation` (or return a failed `MoveResult` / `(False, message)`). Never silently no-op.
 6. **Stop** — `s`/`S` targets whatever `provider.can_stop(live)` allows: Claude Code background jobs via ``claude stop``, otherwise the agent process. Never map Stop onto a global switch such as `hermes pause`.
-7. **Pane-aware keys** — Space / a / d / o / s / m follow the projects vs sessions matrix; **c/C clears all marks** (projects + sessions). **d/D** deletes projects when the projects pane is focused, sessions otherwise. **m/M moves** project(s) or session(s) to another path (pick existing or type cwd) within the same agent tool. **`,`** opens Settings (include backends + config dirs). Enabled backends are federated into one inventory; marks/live use `provider:id` keys.
+7. **Pane-aware keys** — every key comes from the registry in `tui/keys.py`; the footer, help, command palette and README key table read or mirror it. Space / a / d / o / s / m follow the projects vs sessions matrix; **c/C clears all marks** (projects + sessions). **d/D/Del** deletes projects when the projects pane is focused, sessions otherwise. **m/M moves** project(s) or session(s) to another path (pick existing or type cwd) within the same agent tool. Vim keys (j/k/h/l/g/G, Ctrl+D/U) move; **Enter** goes into projects → sessions → details → reader and **Esc** goes back; **`?`** opens help; **Ctrl+P** the command palette. Uppercase equals lowercase except `G` (last row) and `T` (next theme). **`,`** opens Settings (include backends + config dirs). Enabled backends are federated into one inventory; marks/live use `provider:id` keys.
 8. User-facing branding says **aXism**. Name a specific agent only where the code shells out to it.
 9. **Docs are current-state only** — README and similar docs describe how the project works *now*, not how it evolved. Prefer editing content in place over phrases like “was removed,” “previously,” “used to,” “as of [date],” or “no longer.” Do not put agent/process meta-commentary into project files. **Exception:** keep `CHANGELOG.md` up to date on every version bump (see Versioning).
 10. **Changelog** — when bumping the version, move `[Unreleased]` notes into a new `## [X.Y.Z] — YYYY-MM-DD` section in `CHANGELOG.md` and leave a fresh empty `[Unreleased]` stub.
@@ -26,8 +26,18 @@
 
 ```text
 src/axism/
-  cli.py, tui/, agents.py, delete.py, discover.py, fragments.py, live.py, move.py,
+  cli.py, agents.py, delete.py, discover.py, fragments.py, live.py, move.py,
   paths.py, rename.py, settings.py     # Claude Code implementation + shared DTOs
+  tui/
+    app.py            # main screen and actions
+    keys.py           # key registry: single source for bindings, footer, help, palette
+    footer.py         # footer that follows the focused pane
+    help.py           # help screen generated from the registry
+    dialogs.py        # confirm / move / rename / picker dialogs
+    scrolling.py      # shared scroll and movement keys
+    details_view.py   # details pane text
+    reader.py         # full-conversation reader
+    settings_screen.py  # Settings screen
   providers/
     base.py           # SessionProvider protocol, Capabilities, ProviderBase
     common.py         # shared helpers for filesystem-backed backends
