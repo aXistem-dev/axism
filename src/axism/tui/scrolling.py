@@ -46,6 +46,16 @@ class ScrollKeys:
         self.scroll_view().scroll_page_up(animate=False)
 
 
+class ViewScroller(ScrollKeys):
+    """Apply the shared scroll actions to one given scroll view."""
+
+    def __init__(self, view: ScrollableContainer) -> None:
+        self._view = view
+
+    def scroll_view(self) -> ScrollableContainer:
+        return self._view
+
+
 class OptionListKeys:
     """``action_*`` methods for the registry movement actions on one pick list."""
 

@@ -527,3 +527,69 @@ def test_tui_move_refuses_service_running_opencode_session(tmp_path, monkeypatch
     screen, toast = _run(main())
     assert screen != "MoveTargetScreen"
     assert "stop them first" in toast
+
+
+# ---- a running Claude Code background session --------------------------------
+
+
+def test_running_background_session_shows_state_blocks_move_and_stops(tmp_path, monkeypatch):
+    from axism.live import LiveSession
+    from axism.providers.claude_code import ClaudeCodeProvider
+    from axism.tui.dialogs import MoveTargetScreen
+
+    _setup(tmp_path, monkeypatch)
+    live = {
+        SESSION_B: LiveSession(
+            session_id=SESSION_B, pid=None, kind="background", state="working"
+        )
+    }
+    monkeypatch.setattr(tui, "federate_merge_live", lambda provs, use_cli=True: live)
+    stopped: list[str] = []
+
+    def fake_stop(self, sid, live=None):
+        stopped.append(sid)
+        return True, "stopped"
+
+    monkeypatch.setattr(ClaudeCodeProvider, "stop", fake_stop)
+    monkeypatch.setattr(ClaudeCodeProvider, "slash_stop", fake_stop)
+
+    async def highlight(app, pilot, sid):
+        table = app.query_one("#sessions", DataTable)
+        table.focus()
+        keys = [s.key for s in app.selected_project.sessions]
+        row = next(i for i, k in enumerate(keys) if k.endswith(sid))
+        table.move_cursor(row=row, animate=False)
+        await pilot.pause(0.3)
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            await highlight(app, pilot, SESSION_B)
+            assert "running in the background" in str(app.query_one("#detail-body").render())
+            # Move is refused while the session runs.
+            await pilot.press("m")
+            await pilot.pause()
+            assert not isinstance(app.screen, MoveTargetScreen)
+            assert "stop them first" in str(app.query_one("#toast").render())
+            # Stop asks first, then stops through the provider.
+            await pilot.press("s")
+            await pilot.pause()
+            assert isinstance(app.screen, ConfirmDeleteScreen)
+            await pilot.press("y")
+            await pilot.pause()
+            await pilot.pause()
+            assert stopped == [SESSION_B]
+            # The other session is not running: nothing to stop.
+            await highlight(app, pilot, SESSION_A)
+            assert "not running" in str(app.query_one("#detail-body").render())
+            await pilot.press("s")
+            await pilot.pause()
+            assert not isinstance(app.screen, ConfirmDeleteScreen)
+            assert "Nothing to stop" in str(app.query_one("#toast").render())
+            assert stopped == [SESSION_B]
+
+    _run(main())

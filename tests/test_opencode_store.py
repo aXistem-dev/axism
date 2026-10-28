@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from axism.fragments import Fragment
 from axism.providers.opencode_store import discover, fragments, paths
 from tests.opencode_fixtures import make_opencode_db
@@ -249,3 +251,47 @@ def test_subagents_are_folded_recursively(tmp_path):
     inv = fragments.collect_fragments(tmp_path, "ses_t1")
     assert inv.fragments[0].size_bytes == sess.size_bytes
     assert own is not None and own.child_ids == ["ses_k1"]
+
+
+def test_wal_database_with_an_open_writer_lists_sessions_and_adds_no_files(tmp_path):
+    import sqlite3
+
+    root = tmp_path / "wal"
+    db = _base(root)
+    writer = sqlite3.connect(db)
+    try:
+        assert writer.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute("UPDATE session_v2 SET title = 'Edited' WHERE id = 'ses_b1'")
+        writer.commit()
+        writer.execute("BEGIN IMMEDIATE")  # a write transaction stays open
+        before = sorted(p.name for p in root.iterdir())
+        assert discover.layout_status(root) == "ok"
+        projects = discover.discover_all(root)
+        titles = {s.title for p in projects for s in p.sessions}
+        assert {"First", "Edited"} <= titles
+        assert sorted(p.name for p in root.iterdir()) == before
+        writer.rollback()
+    finally:
+        writer.close()
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=PermissionError,
+    reason="layout_status stats the database file unguarded, so an unreadable "
+    "folder raises instead of reporting 'unsupported'",
+)
+def test_unreadable_data_directory_degrades_to_unsupported(tmp_path):
+    import os
+
+    root = tmp_path / "locked"
+    _base(root)
+    root.chmod(0)
+    try:
+        if os.access(root, os.R_OK | os.X_OK):
+            pytest.skip("permissions are not enforced here (running as root)")
+        assert discover.layout_status(root) in {"unsupported", "missing"}
+        assert discover.discover_all(root) == []
+    finally:
+        root.chmod(0o700)

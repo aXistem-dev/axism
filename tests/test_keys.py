@@ -226,3 +226,77 @@ def test_readme_key_table_matches_registry():
         bound = {keys.key_display(k) for i in ids for k in keys.find(i).keys}
         for name in shown:
             assert name in bound, (name, ids)
+
+
+def _readme_row_ids() -> set[str]:
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+    section = text.split("## Using the app", 1)[1].split("Capital letters", 1)[0]
+    by_prefix = {
+        "Go into": ["enter_pane"],
+        "Quit": ["quit"],
+        "Pick a theme": ["pick_theme", "next_theme"],
+    }
+    ids: set[str] = set()
+    for line in section.splitlines():
+        if not line.startswith("| `"):
+            continue
+        action_cell = line.split("|")[2].strip()
+        if action_cell in README_ACTIONS:
+            ids.add(README_ACTIONS[action_cell])
+        else:
+            ids.update(next(v for p, v in by_prefix.items() if action_cell.startswith(p)))
+    return ids
+
+
+def test_every_main_scope_action_is_in_the_readme_table():
+    documented = _readme_row_ids()
+    main = {a.id for a in keys.REGISTRY if a.bound and a.scopes & set(MAIN_SCOPES)}
+    assert main - documented == set()
+
+
+def test_per_scope_overrides_only_name_scopes_the_action_belongs_to():
+    for action in keys.REGISTRY:
+        assert {s for s, _ in action.scope_labels} <= action.scopes, action.id
+        assert {s for s, _ in action.footer_keys} <= action.scopes, action.id
+        assert action.footer_scopes <= action.scopes, action.id
+
+
+def test_every_dialog_action_is_bound_on_its_screen_or_owned_by_a_widget():
+    from axism.tui.dialogs import (
+        AgentPickerScreen,
+        ConfirmDeleteScreen,
+        MoveTargetScreen,
+        QuitConfirmScreen,
+        RenameSessionScreen,
+        ThemePickerScreen,
+        VersionScreen,
+    )
+    from axism.tui.help import HelpScreen
+    from axism.tui.settings_screen import SettingsScreen
+
+    screens = {
+        "dialog:confirm": ConfirmDeleteScreen,
+        "dialog:quit": QuitConfirmScreen,
+        "dialog:rename": RenameSessionScreen,
+        "dialog:move": MoveTargetScreen,
+        "dialog:agent": AgentPickerScreen,
+        "dialog:theme": ThemePickerScreen,
+        "dialog:version": VersionScreen,
+        "help": HelpScreen,
+        "settings": SettingsScreen,
+    }
+    for scope, screen in screens.items():
+        bound = {(b.key, b.action) for b in screen.BINDINGS}
+        for action in keys.actions_for(scope):
+            if not action.bound:
+                continue
+            for key in action.keys:
+                assert (key, action.id) in bound, (scope, action.id, key)
+            assert callable(getattr(screen, f"action_{action.id}", None)), (scope, action.id)
+    # Dialog-only actions never reach the main screen.
+    main_bound = {b.action for b in SessionManagerApp.BINDINGS}
+    for action in keys.REGISTRY:
+        if not action.scopes & set(MAIN_SCOPES):
+            assert action.id not in main_bound, action.id

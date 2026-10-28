@@ -188,3 +188,12 @@ def _isolated_opencode_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     """No test may read the machine's real OpenCode data or state folder."""
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data-default"))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg-state-default"))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_agent_homes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test may stat the machine's real agent folders or home directory."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home-default"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-default"))
+    monkeypatch.setenv("CURSOR_DATA_DIR", str(tmp_path / "cursor-default"))
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-default"))

@@ -526,3 +526,10 @@ def test_rename_message_quotes_title_without_repr(
     monkeypatch.setattr(hermes_ops, "run_hermes", lambda *_a, **_k: (0, ""))
     ok, msg = HermesProvider().rename(CLI_SESSION, "ends with \\")
     assert ok and msg == "renamed to 'ends with \\'"
+
+
+def test_deeply_nested_json_content_is_kept_raw():
+    from axism.providers.hermes_store import discover as hermes_discover
+
+    deep = "[" * 5000 + "]" * 5000
+    assert hermes_discover._structured_text(deep) == deep

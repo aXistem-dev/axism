@@ -64,6 +64,7 @@ from axism.tui.footer import ContextFooter
 from axism.tui.help import HelpScreen, RegistryCommands
 from axism.tui.keys import REGISTRY, bindings_for
 from axism.tui.reader import ReaderScreen
+from axism.tui.scrolling import ViewScroller
 from axism.tui.settings_screen import UNREADABLE_REFUSAL, SettingsScreen
 
 # Registry scopes whose keys are bound on the main screen.
@@ -1256,7 +1257,7 @@ class SessionManagerApp(App[None]):
         if isinstance(target, DataTable):
             target.action_cursor_down()
         elif target is not None:
-            target.scroll_down(animate=False)
+            ViewScroller(target).action_cursor_down()
 
     def action_cursor_up(self) -> None:
         if not self._guard("cursor_up"):
@@ -1265,7 +1266,7 @@ class SessionManagerApp(App[None]):
         if isinstance(target, DataTable):
             target.action_cursor_up()
         elif target is not None:
-            target.scroll_up(animate=False)
+            ViewScroller(target).action_cursor_up()
 
     def action_cursor_first(self) -> None:
         if not self._guard("cursor_first"):
@@ -1275,7 +1276,7 @@ class SessionManagerApp(App[None]):
             if target.row_count:
                 target.move_cursor(row=0, animate=False)
         elif target is not None:
-            target.scroll_home(animate=False)
+            ViewScroller(target).action_cursor_first()
 
     def action_cursor_last(self) -> None:
         if not self._guard("cursor_last"):
@@ -1285,7 +1286,7 @@ class SessionManagerApp(App[None]):
             if target.row_count:
                 target.move_cursor(row=target.row_count - 1, animate=False)
         elif target is not None:
-            target.scroll_end(animate=False)
+            ViewScroller(target).action_cursor_last()
 
     def action_half_page_down(self) -> None:
         if not self._guard("half_page_down"):
@@ -1294,9 +1295,7 @@ class SessionManagerApp(App[None]):
         if isinstance(target, DataTable):
             self._move_table_cursor(target, max(1, self._table_page_rows(target) // 2))
         elif target is not None:
-            target.scroll_relative(
-                y=max(1, target.scrollable_content_region.height // 2), animate=False
-            )
+            ViewScroller(target).action_half_page_down()
 
     def action_half_page_up(self) -> None:
         if not self._guard("half_page_up"):
@@ -1305,9 +1304,7 @@ class SessionManagerApp(App[None]):
         if isinstance(target, DataTable):
             self._move_table_cursor(target, -max(1, self._table_page_rows(target) // 2))
         elif target is not None:
-            target.scroll_relative(
-                y=-max(1, target.scrollable_content_region.height // 2), animate=False
-            )
+            ViewScroller(target).action_half_page_up()
 
     def action_page_down(self) -> None:
         if not self._guard("page_down"):
@@ -1316,7 +1313,7 @@ class SessionManagerApp(App[None]):
         if isinstance(target, DataTable):
             target.action_page_down()
         elif target is not None:
-            target.scroll_page_down(animate=False)
+            ViewScroller(target).action_page_down()
 
     def action_page_up(self) -> None:
         if not self._guard("page_up"):
@@ -1325,7 +1322,7 @@ class SessionManagerApp(App[None]):
         if isinstance(target, DataTable):
             target.action_page_up()
         elif target is not None:
-            target.scroll_page_up(animate=False)
+            ViewScroller(target).action_page_up()
 
     def _focus_pane(self) -> str:
         """Return which main pane owns focus: projects | sessions | detail | other."""

@@ -535,6 +535,32 @@ def test_reader_shows_note_when_transcript_unreadable(tmp_path, monkeypatch, err
     _run(main())
 
 
+def test_reader_worker_error_shows_one_line_note(tmp_path, monkeypatch):
+    _setup_claude(tmp_path, monkeypatch)
+
+    def fail(self, s):
+        raise RuntimeError("odd agent data")
+
+    monkeypatch.setattr(ClaudeCodeProvider, "transcript", fail)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await _focus_sessions(app, pilot)
+            await pilot.press("enter", "enter")
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, ReaderScreen)
+            body = str(screen.query_one("#reader-body").render())
+            assert "odd agent data" in body
+            assert len(body.strip().splitlines()) == 1
+            assert app.is_running
+
+    _run(main())
+
+
 def test_enter_in_details_without_a_session_explains(tmp_path, monkeypatch):
     _setup_claude(tmp_path, monkeypatch)
 
@@ -761,6 +787,28 @@ def test_project_view_counts_service_only_running_sessions(tmp_path, monkeypatch
             assert re.search(r"sessions\s+2\b", text)
             assert re.search(r"running\s+1\b", text)
             assert "selected" not in text and "live/bg" not in text
+
+    _run(main())
+
+
+@pytest.mark.parametrize("size", SIZES)
+def test_project_view_counts_sessions_running_only_via_can_stop(tmp_path, monkeypatch, size):
+    from axism.live import LiveSession
+
+    _setup_claude(tmp_path, monkeypatch)
+    # No pid, state not "running": only the provider says it can be stopped.
+    live = {SID_A: LiveSession(session_id=SID_A, pid=None, kind="interactive", state="idle")}
+    monkeypatch.setattr(tui, "federate_merge_live", lambda provs, use_cli=True: live)
+    monkeypatch.setattr(ClaudeCodeProvider, "can_stop", lambda self, lv: lv is not None)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=size) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            app.query_one("#projects", DataTable).focus()
+            await _settle(app, pilot)
+            assert re.search(r"running\s+1\b", _detail_text(app))
 
     _run(main())
 

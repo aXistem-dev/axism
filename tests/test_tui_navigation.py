@@ -354,3 +354,57 @@ def test_narrow_terminal_skips_the_hidden_details_pane(tmp_path, monkeypatch):
             assert "hidden" in str(app.query_one("#toast").render())
 
     _run(main())
+
+
+def test_tab_and_shift_tab_leave_the_filter_for_the_next_and_previous_pane(
+    tmp_path, monkeypatch
+):
+    _setup(tmp_path, monkeypatch)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await _start(app, pilot)
+            flt = app.query_one("#sessions-filter", Input)
+            await pilot.press("slash")
+            assert app.focused is flt
+            await pilot.press("a", "b")
+            await pilot.press("tab")
+            await pilot.pause()
+            assert app.focused is not flt
+            assert app._focus_pane() == "detail"
+            assert flt.value == "ab"
+            await pilot.press("slash")
+            assert app.focused is flt
+            await pilot.press("shift+tab")
+            await pilot.pause()
+            assert app.focused is not flt
+            assert app._focus_pane() == "projects"
+            assert len(app.screen_stack) == 1
+
+    _run(main())
+
+
+def test_app_keys_do_nothing_behind_a_modal(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            table = await _start(app, pilot)
+            row = table.cursor_row
+            await pilot.press("d")
+            await pilot.pause()
+            assert isinstance(app.screen, ConfirmDeleteScreen)
+            await pilot.press("d", "j", "k")
+            await pilot.pause()
+            assert isinstance(app.screen, ConfirmDeleteScreen)
+            assert len(app.screen_stack) == 2
+            assert table.cursor_row == row
+            await pilot.press("escape")
+            await pilot.pause()
+            assert len(app.screen_stack) == 1
+            assert app.is_running
+            assert table.cursor_row == row
+
+    _run(main())

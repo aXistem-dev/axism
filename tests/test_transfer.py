@@ -441,6 +441,14 @@ def test_roundtrip_claude_to_opencode_dry_run(tmp_path: Path):
     assert not list((tmp_path / "ocdest").rglob("*.db"))
 
 
+def _exit_code(main, argv):
+    """The status ``main`` ends with, whether it returns it or raises SystemExit."""
+    try:
+        return main(argv)
+    except SystemExit as exc:
+        return exc.code
+
+
 def test_failed_import_cli_names_the_leftover_id(tmp_path: Path, monkeypatch, capsys):
     from axism import cli
     from axism.providers import transfer
@@ -454,18 +462,12 @@ def test_failed_import_cli_names_the_leftover_id(tmp_path: Path, monkeypatch, ca
     monkeypatch.setenv("AXISM_CONFIG_DIR", str(tmp_path / "cfg"))
     argv = ["export", OC_ID, "--to-provider", "claude_code", "--to", "/home/alice/x",
             "--provider", "opencode", "--config-dir", str(root)]
-    try:
-        cli.main(argv)
-    except SystemExit as exc:
-        assert exc.code == 1
+    assert _exit_code(cli.main, argv) == 1
     out = capsys.readouterr().out
     assert "imported_session_id (not listed): ses_left1" in out
     assert "new_session_id:" not in out
 
     ok = TransferResult(ok=True, message="done", new_session_id="ses_new1")
     monkeypatch.setattr(transfer, "transfer_session", lambda *a, **k: ok)
-    try:
-        cli.main(argv)
-    except SystemExit:
-        pass
+    assert _exit_code(cli.main, argv) in (0, None)
     assert "new_session_id: ses_new1" in capsys.readouterr().out

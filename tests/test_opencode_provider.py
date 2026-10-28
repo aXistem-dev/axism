@@ -689,9 +689,10 @@ def test_refused_move_prints_once_on_the_cli(prov, capsys, monkeypatch):
     _record_all_providers(prov.config_root())
     monkeypatch.setattr(OpenCodeProvider, "merge_live", lambda self, *a, **k: {})
     monkeypatch.setattr(ops, "service_info", lambda r: None)
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as raised:
         cli.main(["move", A, "--to", DEST, "--provider", "opencode",
                   "--config-dir", str(prov.config_root())])
+    assert raised.value.code == 1
     out = capsys.readouterr().out
     assert out.count(ops.MOVE_NEEDS_SERVICE) + out.count(ops.MOVE_NEEDS_DEFAULT_ROOT) == 1
 
