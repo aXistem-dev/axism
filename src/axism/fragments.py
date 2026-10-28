@@ -36,6 +36,9 @@ PROTECTED_NAMES = frozenset(
         "settings.json",
         "settings.local.json",
         "skills",
+        "opencode.db",
+        "opencode.db-shm",
+        "opencode.db-wal",
         "state.db",
     }
 )
