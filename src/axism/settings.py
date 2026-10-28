@@ -72,6 +72,8 @@ class Settings:
     providers: dict[str, ProviderPrefs] = field(default_factory=dict)
     # Provider ids present in the loaded settings.json (not the in-memory default).
     _recorded: set[str] = field(default_factory=set, repr=False, compare=False)
+    # Set when settings.json exists but could not be read or parsed.
+    _load_error: str = field(default="", repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if DEFAULT_PROVIDER not in self.providers:
@@ -80,6 +82,10 @@ class Settings:
     def recorded_providers(self) -> set[str]:
         """Provider ids the user's settings file records (empty without a file)."""
         return set(self._recorded)
+
+    def load_error(self) -> str:
+        """Why an existing settings file could not be read ('' when it was fine or absent)."""
+        return self._load_error
 
     def mark_recorded(self, names: set[str] | list[str]) -> None:
         self._recorded |= set(names)
@@ -123,17 +129,32 @@ def default_settings() -> Settings:
     )
 
 
+def _unreadable(reason: str) -> Settings:
+    settings = default_settings()
+    settings._load_error = reason
+    return settings
+
+
 def load_settings(path: Path | None = None) -> Settings:
-    """Load settings from disk; missing/invalid file → defaults."""
+    """Load settings from disk.
+
+    A missing file gives the defaults. A file that exists but cannot be read
+    or parsed also gives the defaults, with :meth:`Settings.load_error` set so
+    callers know not to overwrite it.
+    """
     target = path or settings_path()
     try:
         text = target.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+    except (FileNotFoundError, NotADirectoryError):
         return default_settings()
+    except (OSError, UnicodeDecodeError) as exc:
+        return _unreadable(getattr(exc, "strerror", None) or type(exc).__name__)
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        return default_settings()
+        return _unreadable("not valid JSON")
+    if not isinstance(data, dict):
+        return _unreadable("not a JSON object")
     return Settings.from_dict(data)
 
 

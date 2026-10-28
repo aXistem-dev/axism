@@ -117,8 +117,117 @@ def test_new_backend_detected_once(env, monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_nothing_detected_falls_back_to_claude_code(env) -> None:
     result = detect_undecided_providers()
-    assert result.found == ["claude_code"]
+    assert result.found == []
+    assert result.message() == (
+        "No agents found — showing Claude Code; change in Settings (,)"
+    )
     assert _enabled(load_settings()) == {"claude_code"}
+
+
+def test_upgrade_with_agents_enabled_names_only_the_missing_one(env) -> None:
+    _write_settings({"claude_code": True, "cursor": False, "hermes": True})
+    result = detect_undecided_providers()
+    assert result.changed and result.found == [] and result.missing == ["opencode"]
+    assert result.message() == "OpenCode not detected — change in Settings (,)"
+    assert _enabled(load_settings()) == {"claude_code", "hermes"}
+
+
+def test_upgrade_with_new_agent_found(env, tmp_path: Path, monkeypatch) -> None:
+    from tests.opencode_fixtures import make_opencode_db
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    make_opencode_db(tmp_path / "xdg" / "opencode", sessions=[], projects=[], messages=[])
+    _write_settings({"claude_code": True, "hermes": False})
+    result = detect_undecided_providers()
+    assert result.found == ["opencode"] and result.missing == ["cursor"]
+    assert result.message() == (
+        "Found OpenCode; Cursor not detected — change in Settings (,)"
+    )
+
+
+def test_claude_code_recorded_off_nothing_detected_is_fallback(env) -> None:
+    _write_settings({"claude_code": False, "cursor": False})
+    result = detect_undecided_providers()
+    assert result.found == []
+    assert "Claude Code" not in result.message().split("showing")[0]
+    assert result.message() == (
+        "No agents found — showing Claude Code; change in Settings (,)"
+    )
+    assert _enabled(load_settings()) == set()
+
+
+def test_fallback_claude_code_is_not_listed_as_found(env) -> None:
+    _write_settings({"cursor": False})
+    result = detect_undecided_providers()
+    assert "claude_code" not in result.found
+    assert result.message().startswith("No agents found")
+    assert _enabled(load_settings()) == {"claude_code"}
+
+
+_BROKEN = '{"active_provider": "hermes", "providers": {"hermes": {"config_dir": "/home/alice/h"'
+
+
+@pytest.mark.parametrize(
+    "content",
+    [_BROKEN.encode(), b"\xff\xfe not utf-8", b"[1, 2]"],
+    ids=["syntax-error", "not-utf8", "not-an-object"],
+)
+def test_unreadable_settings_are_never_overwritten(env, content: bytes) -> None:
+    path = settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    _claude_data(env["claude"])
+    result = detect_undecided_providers()
+    assert result.changed and result.found == ["claude_code"]
+    assert result.message().endswith(" (settings.json could not be read; not saved)")
+    assert path.read_bytes() == content
+
+
+def test_settings_path_that_is_a_directory_is_not_saved(env) -> None:
+    path = settings_path()
+    path.mkdir(parents=True)
+    result = detect_undecided_providers()
+    assert "(settings.json could not be read; not saved)" in result.message()
+    assert "could not save" not in result.message()
+    assert path.is_dir()
+
+
+def test_cli_keeps_malformed_settings_and_uses_detected_values(env, capsys) -> None:
+    path = settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_BROKEN, encoding="utf-8")
+    _claude_data(env["claude"])
+    with pytest.raises(SystemExit):
+        cli.main(["list"])
+    captured = capsys.readouterr()
+    assert "(settings.json could not be read; not saved)" in captured.err
+    assert "# providers: Claude Code\n" in captured.out
+    assert path.read_text(encoding="utf-8") == _BROKEN
+
+
+def test_cli_with_unwritable_settings_uses_detected_values(
+    env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    blocker = tmp_path / "a-file"
+    blocker.write_text("x", encoding="utf-8")
+    monkeypatch.setenv("AXISM_CONFIG_DIR", str(blocker / "cfg"))
+    _claude_data(env["claude"])
+    with pytest.raises(SystemExit):
+        cli.main(["list"])
+    assert "# providers: Claude Code\n" in capsys.readouterr().out
+
+
+def test_cli_tui_subcommand_prints_no_detection_line(
+    env, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    import axism.tui.app as tui_app
+
+    _claude_data(env["claude"])
+    monkeypatch.setattr(tui_app, "run_tui", lambda: None)
+    with pytest.raises(SystemExit):
+        cli.main(["tui"])
+    assert capsys.readouterr().err == ""
+    assert not settings_path().exists()
 
 
 def test_binary_on_path_counts_as_detected(
@@ -163,7 +272,8 @@ def test_detect_never_raises_on_permission_error(
     monkeypatch.setattr(Path, "is_file", boom)
     for pid in ("claude_code", "cursor", "hermes"):
         assert get_provider(pid).detect() is False
-    assert detect_undecided_providers(save=False).found == ["claude_code"]
+    result = detect_undecided_providers(save=False)
+    assert result.found == [] and result.fallback
 
 
 def test_unwritable_config_dir_keeps_result_and_notes_it(

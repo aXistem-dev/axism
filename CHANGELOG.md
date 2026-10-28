@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Agents without a saved choice are detected once (data folder with content, or the command on `PATH`) and switched on or off accordingly, instead of all being switched on; saved choices are never changed, and Claude Code stays on if nothing is found
+- Agents without a saved choice are detected once (data folder with content, or the command on `PATH`) and switched on or off accordingly, instead of all being switched on; saved choices are never changed, and Claude Code is shown if no agent ends up switched on. The note names the agents found and the ones not detected (in the app as a message, on stderr for other commands); a `settings.json` that cannot be read is never overwritten, and the detected choices then apply to that run only
 
 ## [0.1.2] — 2026-10-27
 

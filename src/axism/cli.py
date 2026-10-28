@@ -43,13 +43,19 @@ def _effective_provider_name(settings: Settings) -> str:
     return name
 
 
+def _settings(args: argparse.Namespace) -> Settings:
+    """Settings as detection left them for this run (loaded once in :func:`main`)."""
+    settings = getattr(args, "settings", None)
+    return settings if isinstance(settings, Settings) else load_settings()
+
+
 def _provider(args: argparse.Namespace) -> SessionProvider:
     """Active backend: ``--provider`` / settings, with ``--config-dir`` override."""
     name = getattr(args, "provider", None)
     config_dir = getattr(args, "config_dir", None)
     if name:
         return get_provider(name, config_dir=config_dir)
-    settings = load_settings()
+    settings = _settings(args)
     if config_dir:
         return get_provider(_effective_provider_name(settings), config_dir=config_dir)
     return provider_from_settings(settings)
@@ -72,7 +78,7 @@ def cmd_list(args: argparse.Namespace) -> int:
         }
         providers_note = provider.label
     else:
-        providers = enabled_providers_from_settings(load_settings())
+        providers = enabled_providers_from_settings(_settings(args))
         projects = federate_discover(providers)
         live_map = federate_merge_live(providers, use_cli=use_cli)
         root = " · ".join(str(p.config_root()) for p in providers)
@@ -323,7 +329,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     if not found:
         # Search all enabled backends when --provider was not set.
         if not getattr(args, "provider", None):
-            for provider in enabled_providers_from_settings(load_settings()):
+            for provider in enabled_providers_from_settings(_settings(args)):
                 found = provider.find_session(args.session_id)
                 if found:
                     source = provider
@@ -506,7 +512,7 @@ def cmd_purge_project(args: argparse.Namespace) -> int:
 
 def cmd_providers(args: argparse.Namespace) -> int:
     """List registered backends and where each stores sessions."""
-    settings = load_settings()
+    settings = _settings(args)
     for pid, label in PROVIDER_LABELS.items():
         prefs = settings.provider_prefs(pid)
         marker = "*" if pid == settings.active_provider else " "
@@ -769,21 +775,22 @@ def main(argv: list[str] | None = None) -> None:
         args.func = cmd_tui
     if not hasattr(args, "no_cli"):
         args.no_cli = False
+    settings = load_settings()
+    # The TUI detects and shows the result as a toast; nothing on stderr first.
+    if args.command not in (None, "tui"):
+        detection = detect_undecided_providers(settings)
+        if detection.changed:
+            print(detection.message(), file=sys.stderr)
+    args.settings = settings
     if getattr(args, "config_dir", None):
         import os
 
         resolved = str(Path(args.config_dir).expanduser().resolve())
         args.config_dir = resolved
         # Claude Code also reads its root from the environment (slug encoding).
-        name = getattr(args, "provider", None) or _effective_provider_name(
-            load_settings()
-        )
+        name = getattr(args, "provider", None) or _effective_provider_name(settings)
         if name == "claude_code":
             os.environ["CLAUDE_CONFIG_DIR"] = resolved
-    if args.command:
-        detection = detect_undecided_providers()
-        if detection.changed:
-            print(detection.message(), file=sys.stderr)
     try:
         rc = args.func(args)
     except UnsupportedOperation as exc:

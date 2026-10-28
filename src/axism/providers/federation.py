@@ -53,6 +53,10 @@ class DetectionResult:
     missing: list[str]
     changed: bool
     save_error: str = ""
+    # Nothing is enabled, so Claude Code is shown as the fallback.
+    fallback: bool = False
+    # settings.json exists but could not be read, so nothing was saved.
+    unreadable: bool = False
 
     def message(self) -> str:
         from axism.providers import PROVIDER_LABELS
@@ -60,14 +64,19 @@ class DetectionResult:
         def labels(ids: list[str]) -> str:
             return ", ".join(PROVIDER_LABELS.get(i, i) for i in ids)
 
-        if self.found:
+        settings_hint = "change in Settings (,)"
+        if self.fallback:
+            text = f"No agents found \u2014 showing Claude Code; {settings_hint}"
+        elif self.found:
             text = f"Found {labels(self.found)}"
             if self.missing:
                 text += f"; {labels(self.missing)} not detected"
-            text += " \u2014 change in Settings (,)"
+            text += f" \u2014 {settings_hint}"
         else:
-            text = "No agents found \u2014 showing Claude Code; change in Settings (,)"
-        if self.save_error:
+            text = f"{labels(self.missing)} not detected \u2014 {settings_hint}"
+        if self.unreadable:
+            text += " (settings.json could not be read; not saved)"
+        elif self.save_error:
             text += f" (could not save settings: {self.save_error})"
         return text
 
@@ -78,7 +87,8 @@ def detect_undecided_providers(
     """Switch backends with no recorded choice on or off by detecting them.
 
     Recorded choices are never modified. Falls back to Claude Code when
-    nothing ends up enabled. Saves only when something changed.
+    nothing ends up enabled. Saves only when something changed, and never
+    over a settings file that exists but could not be read.
     """
     from axism.providers import get_provider, list_provider_ids
 
@@ -97,20 +107,20 @@ def detect_undecided_providers(
             detected = False
         prefs.enabled = detected
         (found if detected else missing).append(pid)
-    if not any(s.provider_prefs(pid).enabled for pid in list_provider_ids()):
-        if DEFAULT_PROVIDER in undecided:
-            s.provider_prefs(DEFAULT_PROVIDER).enabled = True
-            missing.remove(DEFAULT_PROVIDER)
-            found.append(DEFAULT_PROVIDER)
-            found.sort(key=list_provider_ids().index)
+    fallback = not any(s.provider_prefs(pid).enabled for pid in list_provider_ids())
+    if fallback and DEFAULT_PROVIDER in undecided:
+        s.provider_prefs(DEFAULT_PROVIDER).enabled = True
+    unreadable = bool(s.load_error())
     save_error = ""
-    if save:
+    if save and not unreadable:
         try:
             save_settings(s)
         except OSError as exc:
             save_error = exc.strerror or type(exc).__name__
     s.mark_recorded(set(undecided))
-    return DetectionResult(found, missing, True, save_error)
+    return DetectionResult(
+        found, missing, True, save_error, fallback=fallback, unreadable=unreadable
+    )
 
 
 def federate_discover(providers: list[SessionProvider]) -> list[ProjectInfo]:
