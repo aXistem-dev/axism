@@ -11,7 +11,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Buy Me A Coffee](https://img.shields.io/badge/buy%20me%20a%20coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/confituurke)
 
-aXism, a tool by aXistem, is a terminal app plus a command-line tool. It finds every session from **Claude Code**, **Cursor**, and **Hermes**, groups them by project, and lets you open, stop, rename, move, or delete them without digging through hidden folders. It runs on Linux and macOS.
+aXism, a tool by aXistem, is a terminal app plus a command-line tool. It finds every session from **Claude Code**, **Cursor**, **Hermes**, and **OpenCode**, groups them by project, and lets you open, stop, rename, move, or delete them without digging through hidden folders. It runs on Linux and macOS.
 
 ## Why use it
 
@@ -87,7 +87,7 @@ A few things worth knowing:
 
 - Session IDs can be shortened to any unique prefix.
 - `delete`, `delete-project`, `purge-project`, and `stop` only show a preview until you add `--yes`. `delete` and `delete-project` exit 1 after that bare preview, 0 after an explicit `--dry-run` or a `--yes` run that completed, 1 as well when a `--yes` run reported an aborted, refused or failed step, and 2 whenever the plan is blocked (not found, or a live session without `--force`). `move` and `export` take `--dry-run` to preview; `move` refuses sessions that are running unless you pass `--force`.
-- `list` covers every enabled agent. Other commands use the default agent (Claude Code unless you change it), so add `--provider cursor` or `--provider hermes` to work on those sessions.
+- `list` covers every enabled agent. Other commands use the default agent (Claude Code unless you change it), so add `--provider cursor`, `--provider hermes`, or `--provider opencode` to work on those sessions.
 
 ```bash
 axism list --project /home/alice/src/demo
@@ -104,21 +104,23 @@ axism --provider hermes show <session-id>
 | Claude Code | `claude_code` | `~/.claude` | `$CLAUDE_CONFIG_DIR` |
 | Cursor | `cursor` | `~/.cursor` | `$CURSOR_DATA_DIR` |
 | Hermes | `hermes` | `~/.hermes` | `$HERMES_HOME` |
+| OpenCode | `opencode` | `~/.local/share/opencode` | `$XDG_DATA_HOME` |
 
-You can also set a folder per agent in Settings, or pass `--config-dir` on the command line.
+You can also set a folder per agent in Settings, or pass `--config-dir` on the command line. A custom OpenCode data folder must be named `opencode`; aXism lists any folder, but changes to sessions in a folder with another name are refused.
 
-All three agents support open, stop, rename, and delete. Differences:
+All four agents support open, stop, rename, and delete. Differences:
 
-- **Stop** on Claude Code applies to background jobs (via `claude stop`). On Cursor and Hermes it ends the agent process.
-- **Move** works for Claude Code and Cursor. Hermes sessions can be copied to another agent but not moved.
+- **Stop** on Claude Code applies to background jobs (via `claude stop`). On Cursor and Hermes it ends the agent process. On OpenCode it interrupts the running session and closes any OpenCode window that has it open; OpenCode's background service itself is never stopped.
+- **Move** works for Claude Code, Cursor, and OpenCode. Moving OpenCode sessions needs OpenCode's background service running on the default data folder (`opencode service start`); without it, or with a custom data folder, the move is refused before anything is stopped or changed. Hermes sessions can be copied to another agent but not moved.
 - **Project memory merge** is Claude Code only: moving a project into another one also merges its `memory/` folder.
 - **Project purge** (`purge-project`) is Claude Code only.
 - **Hermes** changes go through the `hermes` command, and only regular chat sessions are listed. Profiles, kanban boards, project workspaces, messaging, and cron sessions are left alone.
 - **Cursor** desktop Composer history is not managed.
+- **OpenCode** keeps its sessions in one database, `opencode.db`, owned by OpenCode's server. aXism reads that database for listing (without starting anything) and makes every change through OpenCode itself: the background service when it is running, otherwise a private OpenCode server for that one command. Sub-agent sessions are not listed on their own: they count toward their parent session's size, move and delete with it, and make it count as running while one of them is running or open; stopping the parent interrupts the whole family. Copying a session into OpenCode uses `opencode session import` and creates a session with a new id. Only OpenCode 2 is supported; for any other database layout `axism providers` shows one line saying so and nothing is listed.
 
 ## What is never deleted
 
-Deleting a session never removes credentials (`auth.json`, `.credentials.json`, `.env`), agent config (`settings.json`, `config.yaml`, `cli-config.json`), skills, plugins, daemon keys, project `memory/`, or an agent's whole database (such as Hermes `state.db`).
+Deleting a session never removes credentials (`auth.json`, `.credentials.json`, `.env`), agent config (`settings.json`, `config.yaml`, `cli-config.json`), skills, plugins, daemon keys, project `memory/`, or an agent's whole database (such as Hermes `state.db` or OpenCode `opencode.db`).
 
 Deleting a project removes every session in it along with the agent's folder for that project. For Claude Code that includes the project's `memory/` unless you pass `--keep-memory`; in the app, the project delete dialog states what happens to `memory/` and `k` toggles keeping it (off by default).
 

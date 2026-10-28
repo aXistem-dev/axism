@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- OpenCode 2 provider (`--provider opencode`): sessions from `opencode.db` in the OpenCode data folder (`$XDG_DATA_HOME/opencode`, default `~/.local/share/opencode`), grouped by project, with title, first prompt, size, last update, running state and an `archived` badge; sub-agent sessions are counted with their parent
+- Open, rename and delete OpenCode sessions and projects; every change goes through OpenCode's own server (the background service when it runs, otherwise a private server for that command), and listing never starts anything
+- Stop an OpenCode session: interrupts it and closes any OpenCode window that has it open; a running or open sub-agent session makes its parent count as running, and stopping it interrupts the whole family
+- Move OpenCode sessions and projects to another folder while OpenCode's background service runs on the default data folder; without it, or with a custom data folder, the move is refused before anything is stopped
+- Copy sessions from OpenCode to Claude Code, Cursor and Hermes, and into OpenCode through `opencode session import` (the copy gets a new session id), text turns only, title kept
+- A custom OpenCode data folder in Settings or with `--config-dir`; it must be named `opencode` for changes to work
+- `axism providers` shows whether the OpenCode database was found and supported and whether its background service is running; an unsupported (non-OpenCode 2) layout is reported in one line
+
 ### Changed
 
 - Agents without a saved choice are detected once (data folder with content, or the command on `PATH`) and switched on or off accordingly, instead of all being switched on; saved choices are never changed, and Claude Code stays on if nothing is found

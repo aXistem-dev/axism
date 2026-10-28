@@ -1,6 +1,6 @@
 # Agent instructions for aXism
 
-**aXism** (*Agent Interactive Session Manager*) by aXistem is a TUI + CLI session manager for Claude Code, Cursor, and Hermes. Keep the product name and binary **`axism`** agent-agnostic.
+**aXism** (*Agent Interactive Session Manager*) by aXistem is a TUI + CLI session manager for Claude Code, Cursor, Hermes, and OpenCode. Keep the product name and binary **`axism`** agent-agnostic.
 
 ## Stack
 
@@ -37,6 +37,7 @@ src/axism/
     claude_code.py    # wraps the top-level modules above
     cursor.py + cursor_store/     # ~/.cursor agent transcripts + CLI SQLite chats
     hermes.py + hermes_store/     # ~/.hermes state.db, mutations via the hermes CLI
+    opencode.py + opencode_store/ # OpenCode 2 opencode.db (read-only), mutations via the opencode server
 tests/                # synthetic alice fixtures
 scripts/install.sh
 scripts/check_anonymity.py
