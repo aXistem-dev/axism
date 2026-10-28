@@ -45,6 +45,7 @@ class HermesProvider(ProviderBase):
 
     name = "hermes"
     label = "Hermes"
+    stores_in_database = True
     config_hint = "$HERMES_HOME or ~/.hermes"
     capabilities = Capabilities(
         resume=True,

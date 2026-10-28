@@ -14,6 +14,7 @@ from textual.widgets import DataTable, Input
 import axism.tui.app as tui
 from axism.tui.app import SessionManagerApp
 from axism.tui.dialogs import ConfirmDeleteScreen
+from axism.tui.reader import ReaderScreen
 
 N_SESSIONS = 40
 SIZES = [(80, 24), (120, 40)]
@@ -209,9 +210,11 @@ def test_enter_moves_into_the_next_pane_and_esc_returns(tmp_path, monkeypatch):
             await pilot.press("enter")
             assert app._focus_pane() == "detail"
             await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, ReaderScreen)
+            await pilot.press("escape")
+            await pilot.pause()
             assert app._focus_pane() == "detail"
-            toast = str(app.query_one("#toast").render())
-            assert "Reader arrives in the details pane" in toast
             await pilot.press("escape")
             assert app._focus_pane() == "sessions"
             assert app.focused.id == "sessions"

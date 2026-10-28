@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 from axism.delete import (
@@ -58,6 +59,25 @@ def _last_model(path: Path) -> str | None:
     return model
 
 
+def _first_timestamp(path: Path) -> float | None:
+    """Epoch seconds of the first record with a ``timestamp`` (read-only)."""
+    try:
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if '"timestamp"' not in line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    raw = obj.get("timestamp") if isinstance(obj, dict) else None
+                    if isinstance(raw, str) and raw.strip():
+                        return datetime.fromisoformat(raw.strip()).timestamp()
+                except (ValueError, OverflowError, OSError):
+                    continue
+    except OSError:
+        return None
+    return None
+
+
 class ClaudeCodeProvider(ProviderBase):
     """Sessions under ``$CLAUDE_CONFIG_DIR`` / ``~/.claude`` (or a settings override)."""
 
@@ -89,6 +109,7 @@ class ClaudeCodeProvider(ProviderBase):
         details = super().session_details(session)
         if session.transcript_path.is_file():
             details.model = _last_model(session.transcript_path)
+            details.created = _first_timestamp(session.transcript_path)
         return details
 
     def detect(self) -> bool:

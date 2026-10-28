@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 import platform
 import sys
+from collections import OrderedDict
 from dataclasses import dataclass, replace
+from datetime import datetime
+from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -20,6 +24,7 @@ from textual.widgets.option_list import Option
 
 from axism import __commit__, version_string
 from axism.actions import actions_failed, first_failure
+from axism.details import SessionDetails
 from axism.discover import ProjectInfo, SessionMeta
 from axism.live import LiveSession
 from axism.move import MoveResult
@@ -46,6 +51,7 @@ from axism.settings import (
     save_settings,
     settings_path,
 )
+from axism.tui.details_view import fmt_size, session_details_text
 from axism.tui.dialogs import (
     AgentPickerScreen,
     ConfirmDeleteScreen,
@@ -58,6 +64,7 @@ from axism.tui.dialogs import (
 from axism.tui.footer import ContextFooter
 from axism.tui.help import HelpScreen, RegistryCommands
 from axism.tui.keys import REGISTRY, bindings_for
+from axism.tui.reader import ReaderScreen
 
 # Registry scopes whose keys are bound on the main screen.
 MAIN_SCREEN_SCOPES = ("main", "projects", "sessions", "details", "filter")
@@ -380,13 +387,7 @@ class AxisHeader(Widget):
         brand.update(self._label_for_width(self.size.width))
 
 
-def _fmt_size(n: int) -> str:
-    x: float = float(n)
-    for unit in ("B", "KB", "MB", "GB"):
-        if x < 1024:
-            return f"{x:.0f}{unit}" if unit == "B" else f"{x:.1f}{unit}"
-        x /= 1024
-    return f"{x:.1f}TB"
+_fmt_size = fmt_size
 
 
 def _badges(sess: SessionMeta, live: LiveSession | None) -> str:
@@ -709,14 +710,22 @@ class DetailPane(VerticalScroll):
     def __init__(self, content: str = "", *, id: str | None = None) -> None:
         super().__init__(id=id)
         self._body = Static(content, id="detail-body")
+        self.subject: str | None = None
 
     def compose(self) -> ComposeResult:
         yield self._body
 
-    def update(self, content: str) -> None:
-        """Replace the details text and show it from the top."""
+    def update(self, content: str, *, subject: str | None = None) -> None:
+        """Replace the details text.
+
+        ``subject`` names what is shown (a session or project key). The pane
+        goes back to the top only when the subject changes, so re-rendering
+        the same session (refresh, marks, a finished load) keeps the place.
+        """
         self._body.update(content)
-        self.scroll_home(animate=False)
+        if subject is None or subject != self.subject:
+            self.scroll_home(animate=False)
+        self.subject = subject
 
 
 class SessionManagerApp(App[None]):
@@ -937,6 +946,15 @@ class SessionManagerApp(App[None]):
         self._session_sort = SESSION_SORT_MODES[0][0]
         self._projects_layout: ProjectsLayout | None = None
         self._sessions_layout: SessionsLayout | None = None
+        # Details per (agent, session id, mtime), computed lazily off the UI
+        # thread for the session the pane shows.
+        self._details_cache: OrderedDict[tuple[str, str, float], SessionDetails] = (
+            OrderedDict()
+        )
+        self._details_pending: set[tuple[str, str, float]] = set()
+        self._details_timer: Timer | None = None
+        # The single session the details pane shows (the reader opens it).
+        self._detail_session: SessionMeta | None = None
 
     def compose(self) -> ComposeResult:
         yield AxisHeader(show_clock=True)
@@ -1179,8 +1197,8 @@ class SessionManagerApp(App[None]):
         elif action_id == "enter_pane":
             if pane == "sessions" and "detail" not in self._pane_order():
                 return False, "Details are hidden at this width"
-            if pane == "detail":
-                return False, "Reader arrives in the details pane"
+            if pane == "detail" and self._reader_session() is None:
+                return False, "Select a session first"
         elif action_id == "back":
             if not (in_filter or pane == "detail"):
                 return False, "Esc goes back from the details pane or the filter"
@@ -1269,6 +1287,23 @@ class SessionManagerApp(App[None]):
             self._focus_pane_id("sessions")
         elif pane == "sessions":
             self._focus_pane_id("detail")
+        elif pane == "detail":
+            self._open_reader()
+
+    def _reader_session(self) -> SessionMeta | None:
+        """The session the reader opens: the one the details pane shows."""
+        return self._detail_session or self.selected_session
+
+    def _open_reader(self) -> None:
+        session = self._reader_session()
+        if session is None:
+            return
+        provider = self._provider_for_session(session)
+        self.push_screen(
+            ReaderScreen(
+                session, provider, self._agent_label(session.provider or provider.name)
+            )
+        )
 
     def action_back(self) -> None:
         """Esc: details → sessions list; filter → clear it and leave."""
@@ -1621,7 +1656,7 @@ class SessionManagerApp(App[None]):
             lines.append(
                 "[$text-muted]m/M Move · d/D Delete project · Space toggle mark · Tab to sessions[/]"
             )
-            detail.update("\n".join(lines))
+            detail.update("\n".join(lines), subject="projects:marked")
             return
 
         p = self.selected_project
@@ -1654,7 +1689,7 @@ class SessionManagerApp(App[None]):
             "",
             "[$text-muted]m/M Move · d/D Delete project · Tab/→ sessions[/]",
         ]
-        detail.update("\n".join(lines))
+        detail.update("\n".join(lines), subject=f"project:{p.key}")
 
     def _reload_projects_table(self) -> None:
         table = self.query_one("#projects", DataTable)
@@ -1787,6 +1822,7 @@ class SessionManagerApp(App[None]):
 
     def _show_detail(self) -> None:
         """Right pane: project summary when projects focused; else session detail."""
+        self._detail_session = None
         if self._focus_pane() == "projects":
             self._show_project_detail()
             return
@@ -1820,7 +1856,8 @@ class SessionManagerApp(App[None]):
             lines.append(
                 f"[b $primary]Total[/]  {_fmt_size(total)} across {len(targets)} session(s)"
             )
-            detail.update("\n".join(lines))
+            self._detail_session = None
+            detail.update("\n".join(lines), subject="sessions:marked")
             return
 
         s = targets[0] if targets else self.selected_session
@@ -1830,50 +1867,110 @@ class SessionManagerApp(App[None]):
                 return
             detail.update("[$text-muted]Select a session[/]")
             return
-        live = live_for_session(self.live, s)
-        provider = self._provider_for_session(s)
-        try:
-            inv = provider.collect_fragments(
-                s.session_id, project_slug=s.project_slug
-            )
-        except Exception:
-            from axism.fragments import FragmentInventory
+        self._detail_session = s
+        detail.update(self._session_detail_text(s), subject=f"session:{s.key}")
 
-            inv = FragmentInventory(
-                session_id=s.session_id,
-                project_slug=s.project_slug,
-                fragments=[],
-            )
-        title = s.display_title.replace("\n", " ")
-        lines = [
-            f"[b $accent]{title}[/]",
-            f"[$text-muted]agent[/]    [$secondary]{self._agent_label(s.provider)}[/]",
-            f"[$text-muted]id[/]       [$secondary]{s.session_id}[/]",
-            f"[$text-muted]cwd[/]      {s.cwd or '-'}",
-            f"[$text-muted]project[/]  {s.project_slug}",
-            (
-                f"[$text-muted]size[/]     {_fmt_size(s.size_bytes)}   "
-                f"[$text-muted]mtime[/] {s.mtime_dt.isoformat()}"
-            ),
-            f"[$text-muted]tags[/]     {_badges(s, live)}",
-            (
-                f"[$text-muted]selected[/] "
-                f"{'[$text-success]yes[/]' if s.key in self.selected_session_ids else 'no'}"
-            ),
-            "",
-            "[b $primary]Fragments[/]",
-        ]
-        for f in inv.fragments:
-            flag = " [$text-warning](protected)[/]" if f.is_protected() else ""
-            lines.append(
-                f"  [$secondary]{f.kind}[/]: {_fmt_size(f.size_bytes)}{flag}"
-            )
-            lines.append(f"    [$text-muted]{f.path}[/]")
-        if s.first_prompt:
-            lines.append("")
-            lines.append("[b $primary]First prompt[/]")
-            lines.append(s.first_prompt[:500])
-        detail.update("\n".join(lines))
+    # ---- session details (lazy, cached, off the UI thread) -------------------
+
+    # Seconds the highlight must rest on a session before its details load,
+    # so holding j / k never queues a read per row.
+    DETAILS_DELAY = 0.1
+    DETAILS_CACHE_SIZE = 256
+
+    def _details_key(self, s: SessionMeta) -> tuple[str, str, float]:
+        return (s.provider or self._provider_for_session(s).name, s.session_id, s.mtime)
+
+    def _running_state(self, s: SessionMeta) -> str:
+        live = live_for_session(self.live, s)
+        if live is None:
+            return "not running"
+        where = "in the background" if live.kind == "background" else "in a terminal"
+        if live.is_live:
+            text = f"running {where}"
+        else:
+            text = "not running"
+        if live.state and live.state not in {"idle", "running"}:
+            text += f" · {live.state}"
+        if live.is_remote or s.has_bridge:
+            text += " · remote"
+        return text
+
+    def _session_detail_text(self, s: SessionMeta) -> str:
+        """Facts for ``s``; the conversation part loads lazily on a cache miss."""
+        key = self._details_key(s)
+        details = self._details_cache.get(key)
+        if details is None:
+            self._schedule_details(s)
+        else:
+            self._details_cache.move_to_end(key)
+        provider = self._provider_for_session(s)
+        return session_details_text(
+            s,
+            details,
+            agent=self._agent_label(s.provider or provider.name),
+            state=self._running_state(s),
+            database=bool(getattr(provider, "stores_in_database", False)),
+            now=datetime.now().astimezone(),
+            home=str(Path.home()),
+        )
+
+    def _schedule_details(self, s: SessionMeta) -> None:
+        if self._details_key(s) in self._details_pending:
+            return
+        if self._details_timer is not None:
+            self._details_timer.stop()
+        self._details_timer = self.set_timer(
+            self.DETAILS_DELAY, lambda: self._start_details_load(s)
+        )
+
+    def _start_details_load(self, s: SessionMeta) -> None:
+        self._details_timer = None
+        key = self._details_key(s)
+        shown = self._detail_session
+        if shown is None or self._details_key(shown) != key:
+            return  # the highlight moved on; that session schedules its own load
+        if key in self._details_cache or key in self._details_pending:
+            return
+        self._details_pending.add(key)
+        provider = self._provider_for_session(s)
+        self.run_worker(
+            lambda: self._load_details(provider, s, key),
+            thread=True,
+            group="details",
+            exit_on_error=False,
+        )
+
+    def _load_details(
+        self, provider: SessionProvider, s: SessionMeta, key: tuple[str, str, float]
+    ) -> None:
+        """Worker thread: ask the agent for the details; never raises."""
+        try:
+            details = provider.session_details(s)
+            if not isinstance(details, SessionDetails):
+                raise TypeError("unexpected details")
+        except Exception as exc:  # odd agent data must not break cursor movement
+            reason = " ".join(str(exc).splitlines()[:1]) or type(exc).__name__
+            details = SessionDetails(note=f"Details unavailable: {reason}"[:200])
+        with contextlib.suppress(Exception):  # the app may be closing
+            self.call_from_thread(self._details_loaded, key, details)
+
+    def _details_loaded(
+        self, key: tuple[str, str, float], details: SessionDetails
+    ) -> None:
+        self._details_pending.discard(key)
+        self._details_cache[key] = details
+        self._details_cache.move_to_end(key)
+        while len(self._details_cache) > self.DETAILS_CACHE_SIZE:
+            self._details_cache.popitem(last=False)
+        shown = self._detail_session
+        try:
+            detail = self.query_one("#detail", DetailPane)
+        except Exception:
+            return
+        if shown is not None and detail.subject == f"session:{shown.key}" and (
+            self._details_key(shown) == key
+        ):
+            self._show_detail()
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         table = event.data_table

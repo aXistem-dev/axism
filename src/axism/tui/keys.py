@@ -246,6 +246,12 @@ REGISTRY: tuple[KeyAction, ...] = (
         "Details & reader", _scopes("details", "filter"), footer_priority=55,
     ),
     KeyAction(
+        "close_reader", ("escape", "q", "Q"), "Back",
+        "Reader: back to the details pane",
+        "Details & reader", _scopes("reader"),
+        footer_priority=90, palette=False, priority=True,
+    ),
+    KeyAction(
         "filter_done", ("enter",), "Done",
         "Filter: done typing, go to the filtered sessions list",
         # The filter Input's own Enter (submit); listed, not bound.

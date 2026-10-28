@@ -54,6 +54,9 @@ class SessionProvider(Protocol):
     label: str
     capabilities: Capabilities
     config_hint: str
+    # True when sessions live in the agent's own database rather than in
+    # transcript files (the details pane says so instead of "transcript").
+    stores_in_database: bool
 
     def config_root(self) -> Path:
         """Root directory where this provider stores sessions."""
@@ -226,6 +229,7 @@ class ProviderBase:
         fragments=False,
     )
     config_hint = ""
+    stores_in_database = False
 
     def detect(self) -> bool:
         return False

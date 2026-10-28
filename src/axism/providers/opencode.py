@@ -60,6 +60,7 @@ class OpenCodeProvider(ProviderBase):
 
     name = "opencode"
     label = "OpenCode"
+    stores_in_database = True
     config_hint = "$XDG_DATA_HOME/opencode or ~/.local/share/opencode"
     capabilities = Capabilities(
         resume=True,
