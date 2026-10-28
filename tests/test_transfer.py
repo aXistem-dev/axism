@@ -297,8 +297,19 @@ def test_import_opencode_writes_transfer_json_and_reports_new_id(
         seen["id"] = session_id
         return True, "imported", session_id
 
+    from axism.providers.opencode_store import discover as oc_discover
+    from axism.providers.opencode_store.discover import SessionRow
+
     monkeypatch.setattr(ops, "import_session", fake_import)
     monkeypatch.setattr(ops, "rename_session", lambda *a, **k: (True, "renamed"))
+    monkeypatch.setattr(
+        oc_discover,
+        "session_row",
+        lambda root, sid: SessionRow(
+            id=sid, project_id="p", parent_id=None, directory="/home/alice/src/other",
+            title="Demo cross", time_created=1, time_updated=1,
+        ),
+    )
     dest = _oc_dest(tmp_path)
     result = import_to_provider(dest, _canon(), "/home/alice/src/other")
 
@@ -381,15 +392,29 @@ def test_import_opencode_renames_when_title_lost(tmp_path: Path, monkeypatch):
     assert calls == ["Demo cross"]
 
 
-def test_import_opencode_rename_skipped_when_row_missing(tmp_path: Path, monkeypatch):
+def test_import_opencode_missing_row_is_an_error(tmp_path: Path, monkeypatch):
+    from axism.actions import is_failure_line
     from axism.providers.opencode_store import ops
+    from axism.providers.opencode_store.paths import short_id
 
     monkeypatch.setattr(
-        ops, "import_session", lambda r, f, d, *, session_id: (True, "ok", session_id)
+        ops,
+        "import_session",
+        lambda r, f, d, *, session_id: (True, f"imported {short_id(session_id)}", session_id),
     )
+
+    def no_rename(*a, **k):
+        raise AssertionError("must not rename")
+
+    monkeypatch.setattr(ops, "rename_session", no_rename)
     result = import_to_provider(_oc_dest(tmp_path), _canon(), "/home/alice/src/other")
-    assert result.ok
-    assert any("rename skipped" in a for a in result.actions)
+    assert result.ok is False
+    sid = result.new_session_id
+    assert result.message == (
+        f"error: imported session {short_id(sid)} is not in the OpenCode database aXism lists"
+    )
+    assert is_failure_line(result.message)
+    assert f"imported {short_id(sid)}" in result.actions
 
 
 def test_import_opencode_custom_root_refused(tmp_path: Path):

@@ -246,18 +246,26 @@ def _directory_of(data: dict) -> str | None:
     return None
 
 
+def _service_answers(choice: ServerChoice) -> bool:
+    """The server that answers ``/api/info`` is the background service checked."""
+    ok, body = _api(choice, "GET", "/api/info")
+    pid = body.get("pid") if ok and isinstance(body, dict) else None
+    return choice.service is not None and pid == choice.service.pid
+
+
+def _not_the_service(outcome: str) -> str:
+    return (
+        "refused: the OpenCode server that answered is not the background "
+        f"service aXism checked; {outcome}"
+    )
+
+
 def _verify(choice: ServerChoice, row: SessionRow) -> tuple[bool, str]:
     if not is_session_id(row.id):
         return False, f"refused: not an OpenCode session id: {row.id!r}"
     short = short_id(row.id)
-    if choice.via == "service":
-        ok, body = _api(choice, "GET", "/api/info")
-        pid = body.get("pid") if ok and isinstance(body, dict) else None
-        if choice.service is None or pid != choice.service.pid:
-            return False, (
-                f"refused: the OpenCode server that answered is not the background "
-                f"service aXism checked; {short} left unchanged"
-            )
+    if choice.via == "service" and not _service_answers(choice):
+        return False, _not_the_service(f"{short} left unchanged")
     ok, body = _api(choice, "GET", f"/api/session/{row.id}")
     if not ok:
         return False, f"refused: session {short} not found on the OpenCode server ({body})"
@@ -425,6 +433,8 @@ def import_session(
         choice = choose_server(root)
     except UnsupportedOperation as exc:
         return False, str(exc), ""
+    if choice.via == "service" and not _service_answers(choice):
+        return False, _not_the_service("nothing imported"), ""
     args = [
         "session",
         "import",

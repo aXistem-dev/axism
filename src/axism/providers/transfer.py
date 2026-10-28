@@ -542,8 +542,18 @@ def _import_to_opencode(
     title = canonical.title.strip()[:200]
     row = oc_discover.session_row(root, imported)
     if row is None:
-        actions.append("title note: rename skipped (imported session not in database yet)")
-    elif title and (row.title or "") != title:
+        return TransferResult(
+            ok=False,
+            message=(
+                f"error: imported session {oc_short_id(imported)} is not in the "
+                "OpenCode database aXism lists"
+            ),
+            actions=actions,
+            new_session_id=imported,
+            dest_provider=dest.name,
+            dest_cwd=dest_cwd,
+        )
+    if title and (row.title or "") != title:
         r_ok, r_msg = oc_ops.rename_session(root, row, title)
         actions.append(r_msg if r_ok else f"title note: {r_msg}")
     return TransferResult(

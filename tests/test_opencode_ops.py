@@ -606,10 +606,12 @@ def test_import_via_service_and_unsupported_root(
 ):
     transfer = tmp_path / "transfer.json"
     transfer.write_text("{}")
+    cli.on("GET", "/api/info", (0, server_info(SERVICE_PID), ""))
     cli.on("session", "import", (0, f"Imported session: {SID}\n", ""))
     assert ops.import_session(service_up, transfer, DEST, session_id=SID)[0]
-    assert cli.argvs[-1] == [
-        "opencode", "session", "import", str(transfer), "--directory", DEST
+    assert cli.argvs == [
+        ["opencode", "api", "GET", "/api/info"],
+        ["opencode", "session", "import", str(transfer), "--directory", DEST],
     ]
     odd = tmp_path / "my-sessions"
     odd.mkdir()
@@ -617,6 +619,24 @@ def test_import_via_service_and_unsupported_root(
     ok, msg, _ = ops.import_session(odd, transfer, DEST, session_id=SID)
     assert not ok and msg.startswith("refused:")
     assert len(cli.calls) == n
+
+
+def test_import_via_service_refused_when_another_server_answers(
+    tmp_path: Path, service_up: Path, cli: FakeCLI
+):
+    transfer = tmp_path / "transfer.json"
+    transfer.write_text("{}")
+    cli.on("GET", "/api/info", (0, server_info(SERVICE_PID + 1), ""))
+    ok, msg, new_id = ops.import_session(service_up, transfer, DEST, session_id=SID)
+    assert (ok, new_id) == (False, "")
+    assert msg.startswith("refused: ") and "nothing imported" in msg
+    assert cli.argvs == [["opencode", "api", "GET", "/api/info"]]
+
+    cli.calls.clear()
+    cli.on("GET", "/api/info", (1, "", "connection refused"))
+    ok, msg, _ = ops.import_session(service_up, transfer, DEST, session_id=SID)
+    assert not ok and msg.startswith("refused: ")
+    assert cli.argvs == [["opencode", "api", "GET", "/api/info"]]
 
 
 # --- open ------------------------------------------------------------------------------
