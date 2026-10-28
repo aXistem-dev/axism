@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The footer takes its colours from the theme, so light themes get a light footer
+- The reader and the help screen show their scroll keys (`j/k`, `g/G`, `PgDn/PgUp`) in the footer next to `Esc`; the help screen's footer replaces its hand-written hint line
+- The quit dialog's keys read `y Quit · n Stay · Esc Stay`
+- The delete dialog states its keys once, in the footer (`y Delete forever`), instead of also in a prompt line
+- The help lists keys that share a meaning across dialogs in one row (`Esc / q / Q` closes without changing anything)
+
 ## [0.2.0] — 2026-10-28
 
 OpenCode 2 joins Claude Code, Cursor and Hermes as a fourth agent, aXism switches on the agents it finds installed instead of all of them, and the keyboard, footer, help, details pane and Settings are reworked.

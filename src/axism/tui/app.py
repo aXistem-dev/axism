@@ -2695,9 +2695,6 @@ class SessionManagerApp(App[None]):
             return
         self._cycle_theme(1)
 
-    def action_prev_theme(self) -> None:
-        self._cycle_theme(-1)
-
     def _confirm_delete_projects(self, projects: list[ProjectInfo]) -> None:
         if not projects:
             self._show_toast("No project selected", success=False, seconds=2.5)

@@ -92,11 +92,16 @@ class DialogScreen(ModalScreen[ResultT]):
         """Registry actions of this dialog that do not apply to this instance."""
         return frozenset()
 
+    def footer_labels(self) -> dict[str, str]:
+        """Footer labels that replace the registry's for this instance."""
+        return {}
+
     def footer(self) -> ContextFooter:
         return ContextFooter(
             self.SCOPE,
             lambda action_id: self.check_action(action_id, ()) is not False,
             hidden=self.footer_hidden(),
+            labels=self.footer_labels(),
         )
 
     def check_action(
@@ -212,19 +217,7 @@ class ConfirmDeleteScreen(ScrollKeys, DialogScreen[bool]):
     ConfirmDeleteScreen #confirm-warn.-empty {
         display: none;
     }
-    ConfirmDeleteScreen #confirm-prompt {
-        margin-top: 1;
-        padding: 0 1;
-        background: $error 20%;
-        text-style: bold;
-    }
-    ConfirmDeleteScreen .-project-danger #confirm-prompt {
-        background: $error 45%;
-        color: $text;
-    }
-    ConfirmDeleteScreen ContextFooter {
-        margin-top: 0;
-    }
+
     """
 
     def __init__(
@@ -264,14 +257,6 @@ class ConfirmDeleteScreen(ScrollKeys, DialogScreen[bool]):
                     "session fragments."
                 )
         dialog_classes = "dialog -project-danger" if self.project_danger else "dialog"
-        verb = (
-            f"{self.confirm_verb} forever"
-            if self.confirm_verb.lower() in {"delete"}
-            else self.confirm_verb
-        )
-        prompt = Content.assemble(
-            ("y", "bold"), f"  {verb}     ", ("n", "bold"), " / Esc  Cancel"
-        )
         yield Vertical(
             Vertical(
                 Static(title, id="confirm-title"),
@@ -283,7 +268,6 @@ class ConfirmDeleteScreen(ScrollKeys, DialogScreen[bool]):
                 classes="dialog-head",
             ),
             Vertical(
-                Static(prompt, id="confirm-prompt"),
                 self.footer(),
                 classes="dialog-foot",
             ),
@@ -303,6 +287,14 @@ class ConfirmDeleteScreen(ScrollKeys, DialogScreen[bool]):
 
     def scroll_view(self) -> ScrollableContainer:
         return self.query_one("#confirm-scroll", VerticalScroll)
+
+    def footer_labels(self) -> dict[str, str]:
+        verb = (
+            f"{self.confirm_verb} forever"
+            if self.confirm_verb.lower() in {"delete"}
+            else self.confirm_verb
+        )
+        return {"confirm": verb}
 
     def footer_hidden(self) -> frozenset[str]:
         return frozenset() if self.memory_toggle else frozenset({"toggle_memory"})

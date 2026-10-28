@@ -120,7 +120,7 @@ def _footer_plain(screen: Screen) -> str:
     footer = screen.query_one(ContextFooter)
     return footer.render_for(
         footer.scope, footer._available, footer.content_region.width or 80,
-        footer._hidden,
+        footer._hidden, footer._labels,
     ).plain
 
 
@@ -187,8 +187,8 @@ def test_dialog_footer_fits_and_lists_only_dialog_keys(scope):
     assert text and len(text) <= 66, (scope, text)
     assert "? Help" not in text and "q Quit" not in text
     for action in keys.actions_for(scope):
-        if action.footer_priority is not None:
-            assert f"{keys.key_display(action.keys[0])} {action.label}" in text, (
+        if action.footer_priority_in(scope) is not None:
+            assert f"{keys.key_display(action.keys[0])} {action.label_in(scope)}" in text, (
                 scope,
                 action.id,
             )
@@ -293,7 +293,7 @@ def test_delete_dialog_long_list_scrolls(tmp_path, monkeypatch, size):
             await pilot.press("g")
             await pilot.pause()
             assert body.scroll_y == 0
-            assert "y Yes" in _footer_plain(screen)
+            assert "y Delete forever" in _footer_plain(screen)
             assert "m Memory" not in _footer_plain(screen)
             await pilot.press("y")
             await pilot.pause()
@@ -486,7 +486,7 @@ def test_typing_in_rename_and_move_inputs_never_triggers_keys(tmp_path, monkeypa
             # The quit dialog: y / n / Esc from the registry.
             app.push_screen(QuitConfirmScreen(1), results.append)
             await pilot.pause()
-            assert "y Yes" in _footer_plain(app.screen)
+            assert "y Quit" in _footer_plain(app.screen)
             await pilot.press("N")
             await pilot.pause()
 
@@ -514,6 +514,36 @@ def test_typing_q_in_the_settings_path_does_not_close_settings(tmp_path, monkeyp
             await pilot.pause()
             assert app.screen is screen
             assert path.value == "qQ x"
+            await pilot.press("escape")
+            await pilot.pause()
+
+    _run(main())
+
+
+@pytest.mark.parametrize("size", SIZES)
+def test_delete_dialog_states_its_keys_once(tmp_path, monkeypatch, size):
+    _setup(tmp_path, monkeypatch)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=size) as pilot:
+            await _start(app, pilot, "#sessions")
+            await pilot.press("space", "d")
+            await pilot.pause()
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, ConfirmDeleteScreen)
+            assert not screen.query("#confirm-prompt")
+            plain = _footer_plain(screen)
+            assert plain.startswith("y Delete forever"), plain
+            assert "Esc Cancel" in plain
+            _assert_fits(screen, size)
+            footer = screen.query_one(ContextFooter)
+            assert screen.query_one(".dialog-foot").region.contains_region(footer.region)
+            # Only y confirms.
+            await pilot.press("x", "enter", "space")
+            await pilot.pause()
+            assert isinstance(app.screen, ConfirmDeleteScreen)
             await pilot.press("escape")
             await pilot.pause()
 

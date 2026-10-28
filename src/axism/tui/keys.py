@@ -68,6 +68,27 @@ class KeyAction:
     # False: the key belongs to a widget (an Input's Enter); it is listed in the
     # help but not bound, so the widget keeps handling it.
     bound: bool = True
+    # Per-scope overrides: label shown where the scope differs from ``label``
+    # (the quit dialog's "Quit" / "Stay"), the key text the footer shows
+    # ("j/k" for a pair of keys), and the scopes whose footer lists the action
+    # (empty: every scope the action belongs to).
+    scope_labels: tuple[tuple[str, str], ...] = ()
+    footer_keys: tuple[tuple[str, str], ...] = ()
+    footer_scopes: frozenset[str] = frozenset()
+
+    def label_in(self, scope: str) -> str:
+        """The label for ``scope``."""
+        return dict(self.scope_labels).get(scope, self.label)
+
+    def footer_keys_in(self, scope: str) -> str:
+        """The key text the footer shows for ``scope``."""
+        return dict(self.footer_keys).get(scope, key_display(self.keys[0]))
+
+    def footer_priority_in(self, scope: str) -> int | None:
+        """Footer position in ``scope`` (``None``: not listed there)."""
+        if self.footer_scopes and scope not in self.footer_scopes:
+            return None
+        return self.footer_priority
 
 
 def _scopes(*names: str) -> frozenset[str]:
@@ -80,6 +101,8 @@ _MOVE = _scopes(
     "dialog:confirm", "dialog:version", "dialog:move", "dialog:agent", "dialog:theme",
     "settings",
 )
+# The reader and the help screen list their scroll keys in the footer.
+_SCROLL_FOOTER = _scopes("reader", "help")
 _LISTS = _scopes("projects", "sessions", "details")
 _SESSIONS = _scopes("sessions", "details")
 # Dialogs that ask a yes / no question.
@@ -95,6 +118,9 @@ REGISTRY: tuple[KeyAction, ...] = (
         "cursor_down", ("down", "j", "J"), "Down",
         "Move down one row, or scroll down one line",
         "Everywhere", _MOVE, priority=True,
+        footer_priority=1, footer_scopes=_SCROLL_FOOTER,
+        footer_keys=(("reader", "j/k"), ("help", "j/k")),
+        scope_labels=(("reader", "Scroll"), ("help", "Scroll")),
     ),
     KeyAction(
         "cursor_up", ("up", "k", "K"), "Up",
@@ -105,6 +131,9 @@ REGISTRY: tuple[KeyAction, ...] = (
         "cursor_first", ("home", "g"), "First",
         "Jump to the first row, or the top of the text",
         "Everywhere", _MOVE, priority=True,
+        footer_priority=2, footer_scopes=_SCROLL_FOOTER,
+        footer_keys=(("reader", "g/G"), ("help", "g/G")),
+        scope_labels=(("reader", "Top/End"), ("help", "Top/End")),
     ),
     KeyAction(
         "cursor_last", ("end", "G"), "Last",
@@ -122,6 +151,9 @@ REGISTRY: tuple[KeyAction, ...] = (
     KeyAction(
         "page_down", ("pagedown",), "Page down",
         "Move down one page", "Everywhere", _MOVE, priority=True,
+        footer_priority=3, footer_scopes=_SCROLL_FOOTER,
+        footer_keys=(("reader", "PgDn/PgUp"), ("help", "PgDn/PgUp")),
+        scope_labels=(("reader", "Page"), ("help", "Page")),
     ),
     KeyAction(
         "page_up", ("pageup",), "Page up",
@@ -263,11 +295,13 @@ REGISTRY: tuple[KeyAction, ...] = (
         "confirm", ("y", "Y"), "Yes",
         "Yes: go ahead (delete, stop, move, copy or quit)",
         "Dialogs", _QUESTIONS, footer_priority=10, palette=False, priority=True,
+        scope_labels=(("dialog:quit", "Quit"),),
     ),
     KeyAction(
         "decline", ("n", "N"), "No",
         "No: cancel the question", "Dialogs", _QUESTIONS,
         footer_priority=20, palette=False, priority=True,
+        scope_labels=(("dialog:quit", "Stay"),),
     ),
     KeyAction(
         "toggle_memory", ("m", "M"), "Memory",
@@ -293,18 +327,19 @@ REGISTRY: tuple[KeyAction, ...] = (
     ),
     KeyAction(
         "cancel", ("escape",), "Cancel",
-        "Close the dialog without changing anything",
+        "Close without changing anything (q works in pickers, Settings, help and version)",
         "Dialogs", _CANCEL, footer_priority=90, palette=False, priority=True,
+        scope_labels=(("dialog:quit", "Stay"),),
     ),
     KeyAction(
         "cancel_picker", ("q", "Q"), "Cancel",
-        "Close a picker or Settings without changing anything",
+        "Close without changing anything (q works in pickers, Settings, help and version)",
         "Dialogs", _scopes("dialog:agent", "dialog:theme", "settings"),
         palette=False, priority=True,
     ),
     KeyAction(
         "close", ("escape", "q", "Q"), "Close",
-        "Close the help or the version window",
+        "Close without changing anything (q works in pickers, Settings, help and version)",
         "Dialogs", _scopes("help", "dialog:version"),
         footer_priority=90, palette=False, priority=True,
     ),

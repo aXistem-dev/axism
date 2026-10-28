@@ -450,7 +450,9 @@ def test_enter_in_details_opens_reader_and_esc_returns(tmp_path, monkeypatch, si
             assert body.index("first question") < body.index("second answer")
             footer = screen.query_one(ContextFooter)
             assert footer.scope == "reader"
-            assert "Esc" in str(footer.render())
+            plain = str(footer.render())
+            for piece in ("j/k Scroll", "g/G Top/End", "PgDn/PgUp Page", "Esc Back"):
+                assert piece in plain, plain
             await pilot.press("escape")
             await pilot.pause()
             assert not isinstance(app.screen, ReaderScreen)

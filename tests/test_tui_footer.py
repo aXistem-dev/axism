@@ -106,7 +106,7 @@ def test_footer_orders_by_priority_and_truncates_whole_entries():
     entries = wide.split(" · ")
     shown = [
         a for a in keys.REGISTRY
-        if a.footer_priority is not None
+        if a.footer_priority_in("sessions") is not None
         and ("sessions" in a.scopes or "main" in a.scopes)
     ]
     shown.sort(key=lambda a: a.footer_priority)
@@ -357,3 +357,42 @@ def test_esc_with_nothing_to_back_out_of_is_silent(tmp_path, monkeypatch, size):
                 assert app.focused is app.query_one("#sessions")
 
     _run(main())
+
+
+# ---- theme colours ------------------------------------------------------------
+
+
+def _footer_background(theme: str, size=(120, 40)):
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=size) as pilot:
+            await pilot.pause()
+            app.theme = theme
+            await pilot.pause()
+            footer = app.query_one(ContextFooter)
+            text = footer.render()
+            key_style = footer.get_component_rich_style("context-footer--key")
+            return footer.styles.background, key_style.color, text
+
+    return _run(main())
+
+
+def test_footer_follows_the_theme(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    dark_bg, dark_key, _ = _footer_background("textual-dark")
+    light_bg, light_key, text = _footer_background("textual-light")
+    assert dark_bg != light_bg
+    # A light theme gets a light footer, a dark one a dark footer.
+    assert light_bg.brightness > 0.5 > dark_bg.brightness
+    assert dark_key != light_key
+    assert text.plain
+
+
+def test_footer_text_has_no_fixed_colours():
+    text = _render("sessions")
+    assert not any("#" in str(span.style) for span in text.spans)
+
+
+def test_no_unused_theme_action():
+    assert not hasattr(SessionManagerApp, "action_prev_theme")
+    assert hasattr(SessionManagerApp, "action_next_theme")

@@ -14,6 +14,7 @@ from textual.containers import ScrollableContainer, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Static
 
+from axism.tui.footer import ContextFooter
 from axism.tui.keys import REGISTRY, KeyAction, bindings_for, help_sections, key_display
 from axism.tui.scrolling import ScrollKeys
 
@@ -51,8 +52,28 @@ def keys_text(action: KeyAction) -> str:
     return " / ".join(key_display(key) for key in action.keys)
 
 
+def help_rows(actions: list[KeyAction]) -> list[tuple[str, str]]:
+    """``(keys, description)`` rows for ``actions``.
+
+    Actions with the same description share one row whose keys are the
+    union of theirs, so a meaning shared by several dialogs is listed once
+    (``Esc / q / Q`` — close without changing anything).
+    """
+    rows: dict[str, list[str]] = {}
+    for action in actions:
+        shown = rows.setdefault(action.description, [])
+        shown.extend(
+            text for text in map(key_display, action.keys) if text not in shown
+        )
+    return [(" / ".join(shown), description) for description, shown in rows.items()]
+
+
 def _key_width() -> int:
-    return max(len(keys_text(action)) for action in REGISTRY)
+    return max(
+        len(text)
+        for _group, actions in help_sections()
+        for text, _description in help_rows(actions)
+    )
 
 
 def help_text() -> str:
@@ -62,7 +83,7 @@ def help_text() -> str:
     for group, actions in help_sections():
         lines.append(group)
         lines.extend(
-            f"  {keys_text(action):<{width}}  {action.description}" for action in actions
+            f"  {text:<{width}}  {description}" for text, description in help_rows(actions)
         )
         lines.append("")
     lines.append("Notes")
@@ -74,8 +95,8 @@ def _section_table(actions: list[KeyAction], width: int) -> Table:
     table = Table.grid(padding=(0, 2), expand=True)
     table.add_column(min_width=width, no_wrap=True, style="bold")
     table.add_column(ratio=1, overflow="fold")
-    for action in actions:
-        table.add_row(Text(keys_text(action)), Text(action.description))
+    for text, description in help_rows(actions):
+        table.add_row(Text(text), Text(description))
     return table
 
 
@@ -114,10 +135,8 @@ class HelpScreen(ScrollKeys, ModalScreen[None]):
     #help-scroll > .help-heading {
         margin-top: 1;
     }
-    #help-hint {
-        height: 1;
-        color: $text-muted;
-        padding: 0 1;
+    #help-dialog ContextFooter {
+        margin-top: 1;
     }
     """
 
@@ -129,8 +148,7 @@ class HelpScreen(ScrollKeys, ModalScreen[None]):
     def compose(self) -> ComposeResult:
         yield Vertical(
             VerticalScroll(*self._content(), id="help-scroll", can_focus=True),
-            Static("Esc / q / ?  close · j k g G Ctrl+D Ctrl+U PgUp PgDn  scroll",
-                   id="help-hint", markup=False),
+            ContextFooter("help", id="help-footer"),
             id="help-dialog",
         )
 
@@ -171,7 +189,10 @@ class RegistryCommands(Provider):
         # The footer's actions first, in footer order; then the rest.
         commands = self._commands()
         commands.sort(
-            key=lambda a: (a.footer_priority is None, a.footer_priority or 0)
+            key=lambda a: (
+                a.footer_priority is None or bool(a.footer_scopes),
+                a.footer_priority or 0,
+            )
         )
         for action in commands:
             yield DiscoveryHit(

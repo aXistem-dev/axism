@@ -146,8 +146,8 @@ def test_help_scrolls_and_closes(tmp_path, monkeypatch, size):
             await pilot.press("home")
             await pilot.pause()
             assert scroll.scroll_y == 0
-            # The close hint stays on screen below the scroll view.
-            hint = app.screen.query_one("#help-hint")
+            # The footer stays on screen below the scroll view.
+            hint = app.screen.query_one("#help-footer")
             assert hint.region.bottom <= size[1]
             assert "Esc" in str(hint.render())
             await pilot.press("escape")
@@ -331,7 +331,10 @@ def test_palette_lists_footer_actions_first(tmp_path, monkeypatch):
             await pilot.press("ctrl+p")
             listed = await _palette_options(app, pilot)
             footer = sorted(
-                (a for a in keys.REGISTRY if a.palette and a.footer_priority is not None),
+                (
+                    a for a in keys.REGISTRY
+                    if a.palette and a.footer_priority is not None and not a.footer_scopes
+                ),
                 key=lambda a: a.footer_priority,
             )
             assert listed[: len(footer)] == [a.description for a in footer]
@@ -345,3 +348,51 @@ def test_help_note_says_what_esc_does_in_text_fields():
     assert "Esc leaves it" not in text
     assert "In the sessions filter, Esc clears the filter and leaves it" in text
     assert "Esc cancels the dialog" in text
+
+
+def test_help_dialog_rows_merge_shared_meanings():
+    dialogs = dict(keys.help_sections())["Dialogs"]
+    from axism.tui.help import help_rows
+
+    rows = help_rows(dialogs)
+    descriptions = [description for _keys, description in rows]
+    assert len(descriptions) == len(set(descriptions))
+    closing = [text for text, description in rows if description.startswith("Close without")]
+    assert closing == ["Esc / q / Q"]
+    # Every key of every dialog action is still listed.
+    shown = " ".join(text for text, _d in rows)
+    for action in dialogs:
+        for key in action.keys:
+            assert keys.key_display(key) in shown, action.id
+
+
+@pytest.mark.parametrize("size", SIZES)
+def test_help_screen_uses_the_context_footer(tmp_path, monkeypatch, size):
+    from axism.tui.footer import ContextFooter
+
+    _setup(tmp_path, monkeypatch)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=size) as pilot:
+            await pilot.pause()
+            await pilot.press("question_mark")
+            await pilot.pause()
+            assert isinstance(app.screen, HelpScreen)
+            assert not app.screen.query("#help-hint")
+            footer = app.screen.query_one(ContextFooter)
+            assert footer.scope == "help"
+            plain = str(footer.render())
+            for piece in ("j/k Scroll", "g/G Top/End", "PgDn/PgUp Page", "Esc Close"):
+                assert piece in plain, plain
+            assert footer.region.height == 1
+            assert app.screen.region.contains_region(footer.region)
+
+    _run(main())
+
+
+def test_quit_dialog_labels():
+    from axism.tui.footer import ContextFooter
+
+    plain = ContextFooter().render_for("dialog:quit", lambda _a: True, 80).plain
+    assert plain == "y Quit · n Stay · Esc Stay"
