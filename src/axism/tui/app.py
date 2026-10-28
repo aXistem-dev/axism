@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import platform
 import sys
 from collections.abc import Callable
@@ -47,14 +48,16 @@ from axism.settings import (
     save_settings,
     settings_path,
 )
+from axism.tui.dialogs import QuitConfirmScreen
 from axism.tui.footer import ContextFooter
+from axism.tui.help import HelpScreen, RegistryCommands
 from axism.tui.keys import REGISTRY, bindings_for
 
 # Registry scopes whose keys are bound on the main screen.
 MAIN_SCREEN_SCOPES = ("main", "projects", "sessions", "details", "filter")
 # Registry actions that still act while an Input has focus (everything else,
 # printable or not, belongs to the Input: Inputs win).
-INPUT_ACTIONS = frozenset({"back", "next_pane", "previous_pane"})
+INPUT_ACTIONS = frozenset({"back", "next_pane", "previous_pane", "command_palette"})
 REGISTRY_IDS = frozenset(action.id for action in REGISTRY)
 
 # Avoid Rich markup: "[x]" is parsed as a style tag and renders blank.
@@ -643,78 +646,6 @@ class ConfirmDeleteScreen(ModalScreen[bool]):
         self.query_one("#confirm-memory", Static).update(line)
 
 
-# Full legend for the help screen (order = importance for this app).
-HELP_LEGEND = """[b $accent]aXism keys[/]
-
-[b $primary]Navigate[/]
-  Tab / Shift+Tab   Next / previous pane (projects → sessions → details)
-  ← / → · h / l     Pane left / right
-  ↑ ↓ · j / k       Move within a list, or scroll the details
-  Home End · g / G  First / last row (top / bottom of the details)
-  Ctrl+D / Ctrl+U   Half page down / up
-  PgDn / PgUp       Page down / up
-  Enter             Projects → sessions → details
-  Esc               Details → back to sessions
-
-[b $primary]Select[/] [dim](pane-aware)[/]
-  Space             Projects: toggle project mark · Sessions: toggle session
-  a / A             Projects: select all projects · Sessions/Detail: all sessions in project
-  c / C             Clear ALL marks (projects + sessions, every project)
-
-[b $success]Session[/] [dim](sessions/detail only)[/]
-  o / O             Open focused session in its agent CLI (exits axism)
-  s / S             Stop a live/background session (backend dependent)
-  n / N             Rename focused session (custom title)
-  /                 Focus session filter
-  .                 Cycle session sort (updated / title / size)
-  Esc               Clear filter (when filter focused)
-
-[b $primary]Move[/]
-  m / M             Projects: move project(s) · Sessions/Detail: move session(s)
-                    pick existing project or type a destination path
-                    (same agent relocates; other agent copies text turns, source kept)
-                    (Tab path field · project merges include memory/)
-
-[b $error]Delete[/]
-  d / D / Del       Projects pane: delete project(s)
-                    Sessions/Detail: delete session(s)
-  y / n / Esc       Confirm or cancel in dialogs
-  k                 Project delete dialog: keep project memory (default: deleted)
-
-[b $warning]App[/]
-  r / R             Refresh session list
-  t                 Theme picker
-  T                 Cycle theme
-  ,                 Settings (include agents + config dirs)
-  v / V             Version details
-  ?                 Help (this legend)
-  q / Q             Quit
-
-[dim]This help lists every key; keys that cannot run in the current pane do nothing.
-Inside the filter, typed keys go into the text; Esc clears it and leaves.[/]
-"""
-
-
-class HelpScreen(ModalScreen[None]):
-    """Extended key legend."""
-
-    BINDINGS = [
-        Binding("escape", "close", "Close", show=True, priority=True),
-        Binding("q", "close", "Close", show=True, priority=True),
-        Binding("question_mark", "close", "Close", show=True, priority=True),
-    ]
-
-    def compose(self) -> ComposeResult:
-        yield Vertical(
-            Static(HELP_LEGEND, id="help-body"),
-            Static("[dim]Esc / q / ?  close[/]", id="help-hint"),
-            id="help-dialog",
-        )
-
-    def action_close(self) -> None:
-        self.dismiss(None)
-
-
 class VersionScreen(ModalScreen[None]):
     """Detailed version / runtime info."""
 
@@ -1175,8 +1106,10 @@ class DetailPane(VerticalScroll):
 class SessionManagerApp(App[None]):
     """Main TUI: projects | sessions | detail."""
 
-    # Prefer explicit keybinds in our footer; no Ctrl+P command palette.
-    ENABLE_COMMAND_PALETTE = False
+    # Ctrl+P lists every registry action by name (see tui/help.py); Textual's
+    # own system commands are left out so the palette matches the real keys.
+    ENABLE_COMMAND_PALETTE = True
+    COMMANDS = {RegistryCommands}
 
     CSS = """
     Screen {
@@ -1333,7 +1266,7 @@ class SessionManagerApp(App[None]):
         background: $error 45%;
         color: $text;
     }
-    #confirm-dialog, #help-dialog, #theme-picker-dialog, #rename-dialog, #move-dialog, #agent-picker-dialog, #version-dialog, #settings-dialog {
+    #confirm-dialog, #theme-picker-dialog, #rename-dialog, #move-dialog, #agent-picker-dialog, #version-dialog, #settings-dialog {
         width: 80%;
         height: 70%;
         border: thick $accent;
@@ -1457,16 +1390,6 @@ class SessionManagerApp(App[None]):
     #theme-list {
         height: 1fr;
         border: solid $primary;
-    }
-    #help-hint {
-        margin-top: 1;
-        color: $text-muted;
-    }
-    #help-body {
-        padding: 0 1;
-    }
-    #help-dialog {
-        border: thick $primary;
     }
     """
 
@@ -2560,7 +2483,34 @@ class SessionManagerApp(App[None]):
     async def action_quit(self) -> None:
         if not self._guard("quit"):
             return
-        self.exit()
+        marks = len(self.selected_session_ids) + len(self.selected_project_slugs)
+        if not marks:
+            self.exit()
+            return
+
+        def done(confirmed: bool | None) -> None:
+            if confirmed:
+                self.exit()
+
+        self.push_screen(QuitConfirmScreen(marks), done)
+
+    def action_command_palette(self) -> None:
+        if not self._guard("command_palette"):
+            return
+        super().action_command_palette()
+
+    async def run_registry_action(self, action_id: str) -> None:
+        """Run a registry action chosen outside its key (the command palette).
+
+        The availability check runs first and always explains a refusal, also
+        for actions whose key stays quiet (Esc). The action is called directly,
+        so a focused text field does not swallow it.
+        """
+        if not self._guard(action_id):
+            return
+        result = getattr(self, f"action_{action_id}")()
+        if inspect.isawaitable(result):
+            await result
 
     def action_show_help(self) -> None:
         if not self._guard("show_help"):

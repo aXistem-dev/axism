@@ -161,6 +161,12 @@ REGISTRY: tuple[KeyAction, ...] = (
         "Switch to the next theme", "Everywhere", _scopes("main"),
     ),
     KeyAction(
+        "command_palette", ("ctrl+p",), "Commands",
+        "Open the command palette: run any action by name",
+        # Works inside text fields too; not listed in the palette itself.
+        "Everywhere", _scopes("main"), palette=False, priority=True,
+    ),
+    KeyAction(
         "show_help", ("question_mark",), "Help",
         "Show every key", "Everywhere", _scopes("main"), footer_priority=60,
     ),
@@ -261,6 +267,18 @@ def find(action_id: str) -> KeyAction:
 def actions_for(scope: str) -> list[KeyAction]:
     """Registry entries that apply in ``scope``, in registry order."""
     return [action for action in REGISTRY if scope in action.scopes]
+
+
+def help_sections() -> list[tuple[str, list[KeyAction]]]:
+    """Registry entries grouped for the help screen, in ``GROUPS`` order.
+
+    Each action is listed once, under its ``group``; empty groups are left out.
+    """
+    sections = [
+        (group, [action for action in REGISTRY if action.group == group])
+        for group in GROUPS
+    ]
+    return [(group, actions) for group, actions in sections if actions]
 
 
 def bindings_for(*scopes: str) -> list[Binding]:
