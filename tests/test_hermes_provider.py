@@ -477,7 +477,7 @@ def test_transcript_extracts_text_from_structured_content(
             ("user", json.dumps([{"type": "text", "text": "part one"},
                                  {"type": "image", "url": "x"},
                                  {"type": "text", "content": "part two"}])),
-            ("assistant", json.dumps({"content": "structured answer"})),
+            ("assistant", json.dumps({"type": "text", "text": "structured answer"})),
             ("user", json.dumps([{"type": "image", "url": "x"}])),
             ("user", "[draft] not json"),
         ]
@@ -492,8 +492,42 @@ def test_transcript_extracts_text_from_structured_content(
         ("user", "  tui   prompt  text "),
         ("user", "part one\npart two"),
         ("assistant", "structured answer"),
+        ("user", json.dumps([{"type": "image", "url": "x"}])),
         ("user", "[draft] not json"),
     ]
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"type":"object","properties":{"a":1}}',
+        '[{"type":"bug","id":1}]',
+        '{"content":"x","y":2}',
+        '{"text":"x"}',
+        '[{"type":"image","url":"x"}]',
+        '[{"type":"text","text":"a"}, "loose"]',
+        '{"type":"text","text":"   "}',
+    ],
+)
+def test_json_that_is_not_message_parts_is_kept_as_typed(content):
+    from axism.providers.hermes_store import discover as hermes_discover
+
+    assert hermes_discover._structured_text(content) == content
+
+
+def test_genuine_message_parts_show_their_text():
+    import json
+
+    from axism.providers.hermes_store import discover as hermes_discover
+
+    parts = [
+        {"type": "text", "text": "look at this"},
+        {"type": "image_url", "image_url": {"url": "x"}},
+        {"type": "text", "content": "and this"},
+    ]
+    assert hermes_discover._structured_text(json.dumps(parts)) == "look at this\nand this"
+    single = {"type": "text", "text": "only part"}
+    assert hermes_discover._structured_text(json.dumps(single)) == "only part"
 
 
 def test_transcript_keeps_plain_prompts_that_happen_to_be_json(

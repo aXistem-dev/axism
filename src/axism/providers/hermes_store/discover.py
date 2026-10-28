@@ -176,36 +176,47 @@ def session_exists(root: Path, session_id: str) -> bool:
     return row is not None
 
 
-def _text_parts(value: object) -> list[str]:
-    if isinstance(value, str):
-        return [value] if value.strip() else []
-    if isinstance(value, list):
-        return [t for item in value for t in _text_parts(item)]
-    if isinstance(value, dict):
-        for key in ("text", "content"):
-            if key in value:
-                return _text_parts(value[key])
-    return []
+def _part_text(part: dict) -> str | None:
+    for key in ("text", "content"):
+        value = part.get(key)
+        if isinstance(value, str):
+            return value
+    return None
 
 
-def _looks_like_parts(data: object) -> bool:
-    """Message parts: a list of dicts with a ``type``, or a dict with ``type``/``text``/``content``."""
-    if isinstance(data, list):
-        return bool(data) and all(isinstance(i, dict) and "type" in i for i in data)
-    return isinstance(data, dict) and any(k in data for k in ("type", "text", "content"))
+def _parts_text(data: object) -> str | None:
+    """The text of message parts, or ``None`` when ``data`` is not message parts.
+
+    Message parts are a non-empty list of dicts that all have a ``type`` (at least
+    one with string ``text`` or ``content``), or a single ``{"type": "text",
+    "text": ...}`` dict. Anything else is ordinary JSON.
+    """
+    if isinstance(data, dict):
+        if data.get("type") != "text" or not isinstance(data.get("text"), str):
+            return None
+        parts = [data]
+    elif isinstance(data, list) and data:
+        if not all(isinstance(i, dict) and "type" in i for i in data):
+            return None
+        parts = data
+    else:
+        return None
+    texts = [t for t in (_part_text(p) for p in parts) if t is not None and t.strip()]
+    if not texts:
+        return None
+    return "\n".join(texts).strip()
 
 
 def _structured_text(content: str) -> str:
-    """Plain text, or the text parts of JSON content (empty when it has none)."""
+    """Plain text, the text of JSON message parts, or the content unchanged."""
     if content.lstrip()[:1] not in ("{", "["):
         return content
     try:
         data = json.loads(content)
     except (ValueError, RecursionError):
         return content
-    if not _looks_like_parts(data):
-        return content
-    return "\n".join(_text_parts(data)).strip()
+    text = _parts_text(data)
+    return content if text is None else text
 
 
 def transcript_turns(root: Path, session_id: str) -> list[tuple[str, str]] | None:
