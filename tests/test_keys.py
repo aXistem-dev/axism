@@ -179,6 +179,11 @@ README_ACTIONS = {
     "Pane left": "pane_left",
     "Pane right": "pane_right",
     "Next pane": "next_pane",
+    "Previous pane": "previous_pane",
+    "Page down": "page_down",
+    "Page up": "page_up",
+    "Refresh": "refresh",
+    "Version": "show_version",
     "Back": "back",
     "Mark or unmark": "toggle_select",
     "Mark all": "select_all",
@@ -211,10 +216,13 @@ def test_readme_key_table_matches_registry():
     for line in rows:
         _, key_cell, action_cell, *_ = (c.strip() for c in line.split("|"))
         shown = [k.strip("`") for k in key_cell.split(" / ")]
-        ids = [README_ACTIONS[action_cell]] if action_cell in README_ACTIONS else next(
-            v for p, v in by_prefix.items() if action_cell.startswith(p)
-        )
-        # Esc is bound to several "back" actions; any of the named ones may carry it.
+        if action_cell in README_ACTIONS:
+            ids = [README_ACTIONS[action_cell]]
+        else:
+            matched = [v for p, v in by_prefix.items() if action_cell.startswith(p)]
+            assert matched, f"README row not covered by the test: {action_cell!r}"
+            ids = matched[0]
+        # Every key shown in the row must belong to one of the row's actions.
         bound = {keys.key_display(k) for i in ids for k in keys.find(i).keys}
         for name in shown:
             assert name in bound, (name, ids)

@@ -52,11 +52,14 @@ The app has three panes: **projects**, **sessions**, and **details**. Move with 
 | `k` / `↑` | Up |
 | `g` / `Home` | First row |
 | `G` / `End` | Last row |
+| `PgDn` | Page down |
+| `PgUp` | Page up |
 | `Ctrl+D` | Half page down |
 | `Ctrl+U` | Half page up |
 | `h` / `←` | Pane left |
 | `l` / `→` | Pane right |
 | `Tab` | Next pane |
+| `Shift+Tab` | Previous pane |
 | `Enter` | Go into the highlighted item: projects, sessions, details, then the reader |
 | `Esc` | Back |
 | `Space` | Mark or unmark |
@@ -70,6 +73,8 @@ The app has three panes: **projects**, **sessions**, and **details**. Move with 
 | `/` | Filter sessions |
 | `.` | Sort sessions |
 | `,` | Settings |
+| `r` | Refresh |
+| `v` | Version |
 | `t` / `T` | Pick a theme / next theme |
 | `Ctrl+P` | Command palette: run any action by name |
 | `?` | All keys |

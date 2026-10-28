@@ -32,6 +32,7 @@ OpenCode 2 joins Claude Code, Cursor and Hermes as a fourth agent, aXism switche
 ### Changed
 
 - `?` opens the help (`h` moves to the pane on the left); `q` asks before dropping marks
+- `m` (was `k`) keeps a project's `memory/` folder in the delete dialog
 - Dialogs fit small terminals and scroll when their text is longer than the window
 - `axism tui --provider` and `--config-dir` apply to that run only
 - Agents without a saved choice are detected once (data folder with content, or the command on `PATH`) and switched on or off accordingly, instead of all being switched on; saved choices are never changed, and Claude Code is shown if no agent ends up switched on. The note names the agents found and the ones not detected (in the app as a message, on stderr for other commands); a `settings.json` that cannot be read is never overwritten, and the detected choices then apply to that run only
