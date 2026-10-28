@@ -21,6 +21,7 @@ from axism.providers.federation import (
     live_for_session,
     provider_by_name,
     roots_summary,
+    skipped_note,
     tag_provider,
 )
 from axism.settings import DEFAULT_PROVIDER, Settings, load_settings
@@ -56,6 +57,7 @@ __all__ = [
     "provider_config_hint",
     "provider_from_settings",
     "roots_summary",
+    "skipped_note",
     "tag_provider",
 ]
 

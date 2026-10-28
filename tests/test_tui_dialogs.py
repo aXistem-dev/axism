@@ -92,7 +92,7 @@ def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude))
     real = tui.federate_merge_live
     monkeypatch.setattr(
-        tui, "federate_merge_live", lambda provs, use_cli=True: real(provs, use_cli=False)
+        tui, "federate_merge_live", lambda provs, use_cli=True, **kw: real(provs, use_cli=False, **kw)
     )
     return claude
 

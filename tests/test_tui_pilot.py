@@ -40,7 +40,7 @@ def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, fake: bool = True
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude))
     real = tui.federate_merge_live
     monkeypatch.setattr(
-        tui, "federate_merge_live", lambda provs, use_cli=True: real(provs, use_cli=False)
+        tui, "federate_merge_live", lambda provs, use_cli=True, **kw: real(provs, use_cli=False, **kw)
     )
     return claude
 
@@ -543,7 +543,7 @@ def test_running_background_session_shows_state_blocks_move_and_stops(tmp_path, 
             session_id=SESSION_B, pid=None, kind="background", state="working"
         )
     }
-    monkeypatch.setattr(tui, "federate_merge_live", lambda provs, use_cli=True: live)
+    monkeypatch.setattr(tui, "federate_merge_live", lambda provs, use_cli=True, **_kw: live)
     stopped: list[str] = []
 
     def fake_stop(self, sid, live=None):

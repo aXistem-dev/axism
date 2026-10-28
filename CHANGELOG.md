@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - An unreadable OpenCode data folder is reported as unsupported instead of failing with a permission error
 - Saving Settings with a folder that cannot be read (or that sits under a folder that cannot be read) no longer closes the app; the save check lists it as unreadable, next to folders that do not exist
+- An agent folder that cannot be read no longer stops `axism list` or the app from starting: that agent's sessions are skipped with a note (`Hermes: folder unreadable — skipped`), on stderr or in the app
 
 ### Changed
 

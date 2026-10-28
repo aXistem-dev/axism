@@ -41,6 +41,7 @@ from axism.providers import (
     live_for_session,
     provider_by_name,
     roots_summary,
+    skipped_note,
 )
 from axism.providers.transfer import transfer_sessions
 from axism.settings import (
@@ -821,6 +822,8 @@ class SessionManagerApp(App[None]):
         )
         self.root = self.provider.config_root()
         self.projects: list[ProjectInfo] = []
+        self._skipped_note = ""
+        self._mounting = False
         self.live: dict[str, LiveSession] = {}
         self.selected_project: ProjectInfo | None = None
         self.selected_session: SessionMeta | None = None
@@ -898,9 +901,16 @@ class SessionManagerApp(App[None]):
         self.theme_changed_signal.subscribe(self, self._on_theme_changed)
         self._sync_pane_focus_classes()
         self._sync_narrow_class()
-        self.action_refresh()
-        if self._detection_message:
-            self._show_toast(self._detection_message, success=True, seconds=8.0)
+        self._mounting = True
+        try:
+            self.action_refresh()
+        finally:
+            self._mounting = False
+        notes = [n for n in (self._detection_message, self._skipped_note) if n]
+        if notes:
+            self._show_toast(
+                " \u00b7 ".join(notes), success=not self._skipped_note, seconds=8.0
+            )
         # The first pass runs before the tables have a real size; plan again.
         self.call_after_refresh(self._refit_tables)
 
@@ -1477,8 +1487,10 @@ class SessionManagerApp(App[None]):
     def action_refresh(self) -> None:
         if not self._guard("refresh"):
             return
-        self.projects = federate_discover(self.providers)
-        self.live = federate_merge_live(self.providers, use_cli=True)
+        skipped: list[str] = []
+        self.projects = federate_discover(self.providers, skipped=skipped)
+        self.live = federate_merge_live(self.providers, use_cli=True, skipped=skipped)
+        self._skipped_note = skipped_note(skipped)
         # Failed loads retry; good ones stay cached.
         for key in [k for k, d in self._details_cache.items() if d.note]:
             del self._details_cache[key]
@@ -1488,6 +1500,8 @@ class SessionManagerApp(App[None]):
         self.selected_project_slugs &= known_slugs
         self._reload_projects_table()
         self._refresh_status()
+        if self._skipped_note and not self._mounting:
+            self._show_toast(self._skipped_note, success=False, seconds=8.0)
 
     def _refresh_status(self, extra: str = "") -> None:
         pane = self._focus_pane()

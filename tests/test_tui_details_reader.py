@@ -76,7 +76,7 @@ def _settings(tmp_path: Path, monkeypatch, active: str, providers: dict) -> None
     monkeypatch.setenv("HOME", "/home/alice")
     real = tui.federate_merge_live
     monkeypatch.setattr(
-        tui, "federate_merge_live", lambda provs, use_cli=True: real(provs, use_cli=False)
+        tui, "federate_merge_live", lambda provs, use_cli=True, **kw: real(provs, use_cli=False, **kw)
     )
 
 
@@ -773,7 +773,7 @@ def test_project_view_counts_service_only_running_sessions(tmp_path, monkeypatch
     _setup_claude(tmp_path, monkeypatch)
     # A live record with no pid, state running (as OpenCode service sessions).
     live = {SID_A: LiveSession(session_id=SID_A, pid=None, kind="interactive", state="running")}
-    monkeypatch.setattr(tui, "federate_merge_live", lambda provs, use_cli=True: live)
+    monkeypatch.setattr(tui, "federate_merge_live", lambda provs, use_cli=True, **_kw: live)
 
     async def main():
         app = SessionManagerApp()
@@ -798,7 +798,7 @@ def test_project_view_counts_sessions_running_only_via_can_stop(tmp_path, monkey
     _setup_claude(tmp_path, monkeypatch)
     # No pid, state not "running": only the provider says it can be stopped.
     live = {SID_A: LiveSession(session_id=SID_A, pid=None, kind="interactive", state="idle")}
-    monkeypatch.setattr(tui, "federate_merge_live", lambda provs, use_cli=True: live)
+    monkeypatch.setattr(tui, "federate_merge_live", lambda provs, use_cli=True, **_kw: live)
     monkeypatch.setattr(ClaudeCodeProvider, "can_stop", lambda self, lv: lv is not None)
 
     async def main():

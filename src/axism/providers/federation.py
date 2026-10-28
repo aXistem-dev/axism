@@ -123,11 +123,34 @@ def detect_undecided_providers(
     )
 
 
-def federate_discover(providers: list[SessionProvider]) -> list[ProjectInfo]:
-    """Discover all projects from ``providers``, tagged and sorted by recency."""
+UNREADABLE_SKIPPED = "folder unreadable \u2014 skipped"
+
+
+def _skip(skipped: list[str] | None, provider: SessionProvider) -> None:
+    if skipped is not None and provider.label not in skipped:
+        skipped.append(provider.label)
+
+
+def skipped_note(skipped: list[str]) -> str:
+    """One line naming each agent whose folder could not be read (plain text)."""
+    return "; ".join(f"{label}: {UNREADABLE_SKIPPED}" for label in skipped)
+
+
+def federate_discover(
+    providers: list[SessionProvider], *, skipped: list[str] | None = None
+) -> list[ProjectInfo]:
+    """Discover all projects from ``providers``, tagged and sorted by recency.
+
+    A provider whose folder cannot be read (``OSError``) is left out and its
+    label appended to ``skipped``.
+    """
     projects: list[ProjectInfo] = []
     for provider in providers:
-        found = provider.discover(provider.config_root())
+        try:
+            found = provider.discover(provider.config_root())
+        except OSError:
+            _skip(skipped, provider)
+            continue
         tag_provider(found, provider.name)
         projects.extend(found)
     projects.sort(
@@ -141,12 +164,22 @@ def federate_merge_live(
     providers: list[SessionProvider],
     *,
     use_cli: bool = True,
+    skipped: list[str] | None = None,
 ) -> dict[str, LiveSession]:
-    """Merge live maps; keys are ``provider:session_id``."""
+    """Merge live maps; keys are ``provider:session_id``.
+
+    A provider whose folder cannot be read (``OSError``) adds no live records
+    and its label is appended to ``skipped``.
+    """
     live: dict[str, LiveSession] = {}
     for provider in providers:
         root = provider.config_root()
-        for session_id, record in provider.merge_live(root, use_cli=use_cli).items():
+        try:
+            records = provider.merge_live(root, use_cli=use_cli)
+        except OSError:
+            _skip(skipped, provider)
+            continue
+        for session_id, record in records.items():
             live[f"{provider.name}:{session_id}"] = record
     return live
 

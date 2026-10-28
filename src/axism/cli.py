@@ -27,6 +27,7 @@ from axism.providers import (
     list_provider_ids,
     live_for_session,
     provider_from_settings,
+    skipped_note,
 )
 from axism.settings import Settings, load_settings, save_settings, settings_path
 
@@ -66,25 +67,37 @@ def _provider(args: argparse.Namespace) -> SessionProvider:
 def cmd_list(args: argparse.Namespace) -> int:
     """List sessions. Without ``--provider``, merges every enabled backend."""
     use_cli = not getattr(args, "no_cli", False)
+    skipped: list[str] = []
     if getattr(args, "provider", None) or getattr(args, "config_dir", None):
         provider = _provider(args)
         root = provider.config_root()
-        projects = provider.discover()
+        try:
+            projects = provider.discover()
+        except OSError:
+            projects = []
+            skipped.append(provider.label)
         for p in projects:
             p.provider = provider.name
             for s in p.sessions:
                 s.provider = provider.name
-        live_map = {
-            f"{provider.name}:{sid}": lv
-            for sid, lv in provider.merge_live(use_cli=use_cli).items()
-        }
+        try:
+            live_map = {
+                f"{provider.name}:{sid}": lv
+                for sid, lv in provider.merge_live(use_cli=use_cli).items()
+            }
+        except OSError:
+            live_map = {}
+            if provider.label not in skipped:
+                skipped.append(provider.label)
         providers_note = provider.label
     else:
         providers = enabled_providers_from_settings(_settings(args))
-        projects = federate_discover(providers)
-        live_map = federate_merge_live(providers, use_cli=use_cli)
+        projects = federate_discover(providers, skipped=skipped)
+        live_map = federate_merge_live(providers, use_cli=use_cli, skipped=skipped)
         root = " · ".join(str(p.config_root()) for p in providers)
         providers_note = ", ".join(p.label for p in providers)
+    if skipped:
+        print(skipped_note(skipped), file=sys.stderr)
 
     if args.project:
         projects = filter_projects_by_cwd(projects, args.project)

@@ -136,3 +136,45 @@ def test_fallback_when_all_disabled():
     providers = enabled_providers_from_settings(settings)
     assert len(providers) == 1
     assert providers[0].name == "claude_code"
+
+
+class _Raising:
+    """A provider whose discovery and live lookup raise ``error``."""
+
+    def __init__(self, name: str, label: str, error: Exception) -> None:
+        self.name = name
+        self.label = label
+        self.error = error
+
+    def config_root(self) -> Path:
+        return Path("/home/alice/.agent")
+
+    def discover(self, root=None):
+        raise self.error
+
+    def merge_live(self, root=None, *, use_cli=True):
+        raise self.error
+
+
+def test_an_unreadable_provider_is_skipped_and_named_once():
+    from axism.providers import skipped_note
+
+    providers = [_Raising("hermes", "Hermes", PermissionError(13, "denied"))]
+    skipped: list[str] = []
+    assert federate_discover(providers, skipped=skipped) == []  # type: ignore[arg-type]
+    assert federate_merge_live(providers, skipped=skipped) == {}  # type: ignore[arg-type]
+    assert skipped == ["Hermes"]
+    assert skipped_note(skipped) == "Hermes: folder unreadable — skipped"
+    assert skipped_note(["Hermes", "Cursor"]) == (
+        "Hermes: folder unreadable — skipped; Cursor: folder unreadable — skipped"
+    )
+
+
+def test_errors_other_than_oserror_still_raise():
+    import pytest
+
+    providers = [_Raising("hermes", "Hermes", ValueError("bug"))]
+    with pytest.raises(ValueError):
+        federate_discover(providers, skipped=[])  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        federate_merge_live(providers, skipped=[])  # type: ignore[arg-type]

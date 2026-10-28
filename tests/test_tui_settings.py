@@ -79,7 +79,7 @@ def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
         monkeypatch.setattr(f"axism.providers.{mod}.binary_on_path", lambda *a: False, raising=False)
     real = tui.federate_merge_live
     monkeypatch.setattr(
-        tui, "federate_merge_live", lambda provs, use_cli=True: real(provs, use_cli=False)
+        tui, "federate_merge_live", lambda provs, use_cli=True, **kw: real(provs, use_cli=False, **kw)
     )
     return {"claude": claude, "hermes": hermes}
 
