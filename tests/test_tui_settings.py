@@ -435,3 +435,38 @@ def test_settings_keys_come_from_the_registry_and_help_lists_them():
     text = help_text()
     assert "Make the highlighted agent the CLI default" in text
     assert "Settings: go to the folder field" in text
+
+
+def test_run_config_dir_stays_on_its_agent_after_the_default_changes(tmp_path, monkeypatch):
+    roots = _setup(tmp_path, monkeypatch)
+    override = tmp_path / "claude-override"
+    override.mkdir()
+
+    def folders(app: SessionManagerApp) -> dict[str, Path]:
+        return {p.name: p.config_root() for p in app.providers}
+
+    async def main():
+        app = SessionManagerApp(run_config_dir=str(override))
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            assert folders(app) == {
+                "claude_code": override.resolve(),
+                "hermes": roots["hermes"].resolve(),
+            }
+            screen = await _open(app, pilot)
+            await _highlight(screen, pilot, "hermes")
+            await pilot.press("asterisk", "enter")
+            await pilot.pause()
+            await pilot.pause()
+            assert app._axism_settings.active_provider == "hermes"
+            assert folders(app) == {
+                "claude_code": override.resolve(),
+                "hermes": roots["hermes"].resolve(),
+            }
+
+    _run(main())
+    data = _file(tmp_path)
+    assert data["active_provider"] == "hermes"
+    assert data["providers"]["claude_code"]["config_dir"] == str(roots["claude"])
+    assert data["providers"]["hermes"]["config_dir"] == str(roots["hermes"])
+    assert str(override) not in _settings_file(tmp_path).read_text(encoding="utf-8")

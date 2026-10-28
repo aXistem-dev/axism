@@ -755,6 +755,9 @@ class SessionManagerApp(App[None]):
         self._axism_settings = load_settings()
         detection = detect_undecided_providers(self._axism_settings)
         self._detection_message = detection.message() if detection.changed else ""
+        # The agent ``--config-dir`` applies to, fixed for the run: a later
+        # change of the CLI default in Settings must not move the folder.
+        self._run_config_agent = run_provider or default_provider_id(self._axism_settings)
         self.providers = self._providers_for(self._axism_settings)
         self.provider = (
             provider_by_name(self.providers, self._axism_settings.active_provider)
@@ -786,7 +789,10 @@ class SessionManagerApp(App[None]):
 
     def _providers_for(self, settings: Settings) -> list[SessionProvider]:
         """Agents in the app's inventory: the switched-on ones, narrowed or
-        pointed at another folder by this run's ``--provider`` / ``--config-dir``."""
+        pointed at another folder by this run's ``--provider`` / ``--config-dir``.
+
+        ``--config-dir`` stays on the agent chosen at start (``--provider`` or
+        the CLI default then), whatever Settings later saves."""
         if self._run_provider:
             prefs = settings.providers.get(self._run_provider)
             folder = self._run_config_dir or (prefs.config_dir if prefs else None)
@@ -794,7 +800,7 @@ class SessionManagerApp(App[None]):
         providers = enabled_providers_from_settings(settings)
         if not self._run_config_dir:
             return providers
-        name = default_provider_id(settings)
+        name = self._run_config_agent
         override = get_provider(name, config_dir=self._run_config_dir)
         if any(p.name == name for p in providers):
             return [override if p.name == name else p for p in providers]
