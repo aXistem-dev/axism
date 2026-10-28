@@ -173,3 +173,28 @@ def session_exists(root: Path, session_id: str) -> bool:
     finally:
         con.close()
     return row is not None
+
+
+def transcript_turns(root: Path, session_id: str) -> list[tuple[str, str]] | None:
+    """``(role, text)`` for user/assistant messages, oldest first (read-only).
+
+    ``None`` when the database or session cannot be read.
+    """
+    db = state_db(root)
+    if not db.is_file():
+        return None
+    try:
+        con = connect(db)
+    except sqlite3.Error:
+        return None
+    try:
+        rows = con.execute(
+            "SELECT role, content FROM messages WHERE session_id = ? "
+            "AND role IN ('user', 'assistant') ORDER BY id",
+            (session_id,),
+        ).fetchall()
+    except sqlite3.Error:
+        return None
+    finally:
+        con.close()
+    return [(r[0], r[1]) for r in rows if isinstance(r[1], str) and r[1].strip()]

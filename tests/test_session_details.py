@@ -86,12 +86,12 @@ def test_transcript_unavailable_sets_note(tmp_path: Path, monkeypatch):
     from axism.providers import transfer
     from axism.providers.transfer import CanonicalTranscript
 
-    prov = get_provider("hermes", config_dir=tmp_path / "cfg")
-    meta = _meta(tmp_path / "x", "hermes")
+    prov = get_provider("cursor", config_dir=tmp_path / "cfg")
+    meta = _meta(tmp_path / "x", "cursor")
     monkeypatch.setattr(
         transfer, "export_session",
         lambda p, s: CanonicalTranscript(
-            "t", None, "hermes", SID, [], "Hermes export failed: boom"
+            "t", None, "cursor", SID, [], "Export failed: boom"
         ),
     )
     with pytest.raises(TranscriptUnavailable) as exc:
@@ -191,3 +191,78 @@ def test_opencode_unreadable_db(tmp_path: Path):
         prov.transcript(meta)
     d = prov.session_details(meta)
     assert d.note and d.turns is None
+
+
+# -- tool-using sessions: text turns only -----------------------------------
+
+
+def _tool_rows(tool_text: str = "") -> list[dict]:
+    asst_tool = [{"type": "tool_use", "name": "Bash", "input": {}}]
+    if tool_text:
+        asst_tool.insert(0, {"type": "text", "text": tool_text})
+    return [
+        {"type": "user", "message": {"role": "user", "content": "run the build"}},
+        {"type": "assistant", "message": {"role": "assistant", "content": asst_tool}},
+        {"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}},
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "text", "text": "Build finished"}]}},
+    ]
+
+
+@pytest.mark.parametrize("name", ["claude_code", "cursor"])
+def test_tool_use_does_not_pollute_turns(tmp_path: Path, name: str):
+    prov = get_provider(name, config_dir=tmp_path / "cfg")
+    meta = _meta(_write(tmp_path / f"{SID}.jsonl", _tool_rows("Running it")), name)
+    assert [(t.role, t.content) for t in prov.transcript(meta)] == [
+        ("user", "run the build"),
+        ("assistant", "Running it\nBuild finished"),
+    ]
+    d = prov.session_details(meta)
+    assert (d.turns, d.last_prompt, d.first_prompt) == (2, "run the build", "run the build")
+    assert d.last_reply == "Running it\nBuild finished"
+
+
+def test_tool_only_assistant_turn_is_dropped(tmp_path: Path):
+    prov = get_provider("claude_code", config_dir=tmp_path / "cfg")
+    meta = _meta(_write(tmp_path / f"{SID}.jsonl", _tool_rows()), "claude_code")
+    d = prov.session_details(meta)
+    assert d.turns == 2 and d.last_reply == "Build finished"
+
+
+# -- Hermes: read-only from state.db, no CLI --------------------------------
+
+
+def test_hermes_transcript_reads_database_not_cli(tmp_path: Path, monkeypatch):
+    import sqlite3
+
+    from axism.providers.hermes_store import ops as hermes_ops
+
+    def no_cli(*a, **k):
+        raise AssertionError("hermes CLI must not run")
+
+    monkeypatch.setattr(hermes_ops, "run_hermes", no_cli)
+    root = tmp_path / "hermes"
+    root.mkdir()
+    con = sqlite3.connect(root / "state.db")
+    with con:
+        con.execute(
+            "CREATE TABLE messages (id INTEGER PRIMARY KEY, session_id TEXT,"
+            " role TEXT, content TEXT)"
+        )
+        con.executemany(
+            "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+            [(SID, "user", "hello"), (SID, "tool", "ignored"),
+             (SID, "assistant", "hi there"), (SID, "user", "bye"),
+             (SID, "assistant", "[ran tool: X]"), ("other", "user", "nope")],
+        )
+    con.close()
+    prov = get_provider("hermes", config_dir=root)
+    meta = _meta(root / "state.db", "hermes")
+    assert [(t.role, t.content) for t in prov.transcript(meta)] == [
+        ("user", "hello"), ("assistant", "hi there"), ("user", "bye")]
+    d = prov.session_details(meta)
+    assert (d.turns, d.last_prompt, d.last_reply) == (3, "bye", "hi there")
+    missing = get_provider("hermes", config_dir=tmp_path / "none")
+    with pytest.raises(TranscriptUnavailable):
+        missing.transcript(meta)

@@ -12,11 +12,12 @@ from axism.actions import (
     project_kept_line,
 )
 from axism.delete import DeletePlan, ProjectDeletePlan
+from axism.details import TranscriptUnavailable
 from axism.discover import ProjectInfo, SessionMeta
 from axism.fragments import FragmentInventory, is_safe_id
 from axism.live import LiveSession
 from axism.move import MoveResult
-from axism.providers.base import Capabilities, ProviderBase
+from axism.providers.base import Capabilities, ProviderBase, text_turns
 from axism.providers.common import (
     binary_on_path,
     exec_with_cwd,
@@ -146,6 +147,15 @@ class HermesProvider(ProviderBase):
         return hermes_fragments.collect_fragments(
             self.config_root(), session_id, project_slug=project_slug
         )
+
+    def transcript(self, session: SessionMeta):
+        """Read-only straight from state.db (no CLI process)."""
+        from axism.providers.transfer import Turn
+
+        rows = hermes_discover.transcript_turns(self.config_root(), session.session_id)
+        if rows is None:
+            raise TranscriptUnavailable("Cannot read this session from the Hermes database")
+        return text_turns([Turn(role=r, content=c) for r, c in rows])
 
     def rename(self, session_id: str, title: str) -> tuple[bool, str]:
         return hermes_ops.rename_session(self.config_root(), session_id, title)

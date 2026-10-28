@@ -8,6 +8,7 @@ time in :class:`Capabilities`.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
@@ -180,6 +181,31 @@ class SessionProvider(Protocol):
         ...
 
 
+_TOOL_RESULT_LINE = "[tool result]"
+_TOOL_USE_RE = re.compile(r"^\[ran tool: .*\]$")
+
+
+def text_turns(turns: list[Turn]) -> list[Turn]:
+    """Keep only what was said: drop tool placeholders and merge same-role runs."""
+    from axism.providers.transfer import Turn  # lazy: transfer imports providers
+
+    out: list[Turn] = []
+    for turn in turns:
+        lines = [
+            ln
+            for ln in turn.content.splitlines()
+            if ln.strip() != _TOOL_RESULT_LINE and not _TOOL_USE_RE.match(ln.strip())
+        ]
+        text = "\n".join(lines).strip()
+        if not text:
+            continue
+        if out and out[-1].role == turn.role:
+            out[-1].content = f"{out[-1].content}\n{text}"
+        else:
+            out.append(Turn(role=turn.role, content=text))
+    return out
+
+
 class ProviderBase:
     """Default implementations that refuse unsupported operations.
 
@@ -330,7 +356,7 @@ class ProviderBase:
             raise TranscriptUnavailable(f"Cannot read conversation: {exc}") from exc
         if canonical.export_error:
             raise TranscriptUnavailable(canonical.export_error)
-        return canonical.turns
+        return text_turns(canonical.turns)
 
     def session_details(self, session: SessionMeta) -> SessionDetails:
         details = SessionDetails()
