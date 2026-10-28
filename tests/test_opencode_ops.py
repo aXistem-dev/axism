@@ -914,3 +914,10 @@ def test_move_poll_timeout_follows_the_remaining_budget(service_up: Path, cli: F
     polls = [c for c in cli.calls if c["argv"][2:4] == ["GET", f"/api/session/{SID}"]][1:]
     assert polls[0]["timeout"] > ops.POLL_MIN_TIMEOUT
     assert all(c["timeout"] <= 3 for c in polls)
+
+
+def test_rename_message_quotes_title_without_repr(oc_root: Path, cli: FakeCLI):
+    _ok_session(cli)
+    cli.on("PATCH", f"/api/session/{SID}", (0, "", ""))
+    ok, msg = ops.rename_session(oc_root, _row(), "ends with \\")
+    assert ok and msg == "renamed to 'ends with \\'"
