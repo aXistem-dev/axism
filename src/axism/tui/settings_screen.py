@@ -14,7 +14,6 @@ from pathlib import Path
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.markup import escape
 from textual.widgets import Input, OptionList, Static
 from textual.widgets.option_list import Option
 
@@ -136,10 +135,10 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
     def _row(self, pid: str) -> str:
         star = "*" if pid == self.effective_default() else " "
         mark = MARK_ON if self._enabled.get(pid) else MARK_OFF
-        return escape(f"{star} {mark} {_label(pid):<12} {pid:<12} {self._status[pid]}")
+        return f"{star} {mark} {_label(pid):<12} {pid:<12} {self._status[pid]}"
 
     def _default_line(self) -> str:
-        return escape(f"CLI default: {_label(self.effective_default())}")
+        return f"CLI default: {_label(self.effective_default())}"
 
     # ---- layout ------------------------------------------------------------
 
@@ -152,17 +151,19 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
                     id="settings-title",
                     classes="dialog-title",
                 ),
-                Static(self._default_line(), id="settings-default"),
+                Static(self._default_line(), id="settings-default", markup=False),
                 classes="dialog-head",
             ),
             Vertical(
-                Static("", id="settings-path-label"),
+                Static("", id="settings-path-label", markup=False),
                 Input(id="settings-path"),
-                Static("", id="settings-message"),
+                Static("", id="settings-message", markup=False),
                 self.footer(),
                 classes="dialog-foot",
             ),
-            OptionList(*options, id="settings-providers", classes="dialog-body"),
+            OptionList(
+                *options, id="settings-providers", classes="dialog-body", markup=False
+            ),
             id="settings-dialog",
             classes="dialog",
         )
@@ -189,7 +190,7 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
     # ---- helpers -----------------------------------------------------------
 
     def _say(self, message: str) -> None:
-        self.query_one("#settings-message", Static).update(escape(message))
+        self.query_one("#settings-message", Static).update(message)
 
     def _highlighted(self) -> str | None:
         option_list = self.option_list()
@@ -216,7 +217,7 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
         inp.value = self._config_dirs.get(pid) or ""
         inp.placeholder = provider_config_hint(pid)
         self.query_one("#settings-path-label", Static).update(
-            escape(f"Folder for {_label(pid)} (blank = default)")
+            f"Folder for {_label(pid)} (blank = default)"
         )
         self._path_for = pid
 
@@ -298,7 +299,7 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
         for pid in self._provider_ids:
             prefs = settings.providers[pid]
             if prefs.enabled and prefs.config_dir and not Path(prefs.config_dir).is_dir():
-                lines.append(escape(f"{_label(pid)}: {prefs.config_dir} does not exist"))
+                lines.append(f"{_label(pid)}: {prefs.config_dir} does not exist")
         return lines
 
     def action_save(self) -> None:

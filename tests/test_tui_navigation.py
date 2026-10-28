@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from conftest import write_jsonl
+from textual.content import Content
 from textual.widgets import DataTable, Input
 
 import axism.tui.app as tui
@@ -232,7 +233,7 @@ def test_details_pane_scrolls_with_navigation_keys(tmp_path, monkeypatch):
             await pilot.press("enter")
             detail = app.query_one("#detail")
             assert app.focused is detail
-            detail.update("\n".join(f"line {i}" for i in range(80)))
+            detail.update(Content("\n".join(f"line {i}" for i in range(80))))
             await pilot.pause()
             assert detail.max_scroll_y > 0
             assert detail.size.height < 24
@@ -278,7 +279,7 @@ def test_delete_key_opens_delete_dialog_for_highlighted_session(tmp_path, monkey
             await pilot.press("delete")
             await pilot.pause()
             assert isinstance(app.screen, ConfirmDeleteScreen)
-            assert target.display_title in app.screen.body
+            assert target.display_title in str(app.screen.body)
             await pilot.press("escape")
             await pilot.pause()
             return target.session_id

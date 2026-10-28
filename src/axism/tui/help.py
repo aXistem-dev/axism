@@ -69,7 +69,7 @@ def _section_table(actions: list[KeyAction], width: int) -> Table:
     table.add_column(min_width=width, no_wrap=True, style="bold")
     table.add_column(ratio=1, overflow="fold")
     for action in actions:
-        table.add_row(keys_text(action), action.description)
+        table.add_row(Text(keys_text(action)), Text(action.description))
     return table
 
 

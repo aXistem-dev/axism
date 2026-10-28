@@ -15,6 +15,7 @@ from typing import ClassVar, TypeVar
 
 from textual.app import ComposeResult
 from textual.containers import ScrollableContainer, Vertical, VerticalScroll
+from textual.content import Content
 from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList, Static
 from textual.widgets.option_list import Option
@@ -28,6 +29,15 @@ ResultT = TypeVar("ResultT")
 # While a dialog's text field has focus only these act; every other key belongs
 # to the field (Inputs win).
 INPUT_ACTIONS = frozenset({"cancel", "apply", "focus_path", "focus_list"})
+
+
+def plain(text: str | Content) -> Content:
+    """``text`` as shown on screen: a string is plain text, never markup.
+
+    Dialog bodies, titles and lists carry session titles, folders, paths and
+    agent messages; aXism's own styling comes in as ``Content``.
+    """
+    return text if isinstance(text, Content) else Content(text)
 
 
 def quit_prompt(marks: int) -> str:
@@ -139,7 +149,11 @@ class QuitConfirmScreen(DialogScreen[bool]):
 
 
 class ConfirmDeleteScreen(ScrollKeys, DialogScreen[bool]):
-    """Confirm a destructive action with a clear summary and y/n prompt."""
+    """Confirm a destructive action with a clear summary and y/n prompt.
+
+    ``body`` and ``title`` are plain text unless given as ``Content``; the
+    warnings are plain text.
+    """
 
     SCOPE = "dialog:confirm"
     BINDINGS = bindings_for(SCOPE)
@@ -215,13 +229,13 @@ class ConfirmDeleteScreen(ScrollKeys, DialogScreen[bool]):
 
     def __init__(
         self,
-        body: str,
+        body: str | Content,
         *,
-        title: str,
+        title: str | Content,
         warnings: list[str] | None = None,
         confirm_verb: str = "Delete",
         project_danger: bool = False,
-        memory_toggle: Callable[[bool], tuple[str, str]] | None = None,
+        memory_toggle: Callable[[bool], tuple[str | Content, str | Content]] | None = None,
     ) -> None:
         super().__init__()
         # ``memory_toggle(keep)`` returns (body, memory line) for the keep state.
@@ -241,29 +255,28 @@ class ConfirmDeleteScreen(ScrollKeys, DialogScreen[bool]):
             if self.warnings
             else ""
         )
-        title = self._title
+        title = plain(self._title)
         if self.project_danger:
-            title = f"[b $error]⚠ {self._title}[/]"
+            title = Content.assemble("⚠ ", title).stylize("bold $error")
             if not self.warnings:
                 warn = (
                     "!  This removes the whole project directory and linked "
                     "session fragments."
                 )
         dialog_classes = "dialog -project-danger" if self.project_danger else "dialog"
-        prompt = (
-            f"[b]y[/b]  {self.confirm_verb} forever     "
-            f"[b]n[/b] / Esc  Cancel"
+        verb = (
+            f"{self.confirm_verb} forever"
             if self.confirm_verb.lower() in {"delete"}
-            else (
-                f"[b]y[/b]  {self.confirm_verb}     "
-                f"[b]n[/b] / Esc  Cancel"
-            )
+            else self.confirm_verb
+        )
+        prompt = Content.assemble(
+            ("y", "bold"), f"  {verb}     ", ("n", "bold"), " / Esc  Cancel"
         )
         yield Vertical(
             Vertical(
                 Static(title, id="confirm-title"),
                 Static(
-                    self.memory_toggle(False)[1] if self.memory_toggle else "",
+                    plain(self.memory_toggle(False)[1] if self.memory_toggle else ""),
                     id="confirm-memory",
                     classes="" if self.memory_toggle else "-empty",
                 ),
@@ -276,11 +289,11 @@ class ConfirmDeleteScreen(ScrollKeys, DialogScreen[bool]):
             ),
             VerticalScroll(
                 Static(
-                    warn,
+                    Content(warn),
                     id="confirm-warn",
                     classes="-empty" if not warn else "",
                 ),
-                Static(self.body, id="confirm-body"),
+                Static(plain(self.body), id="confirm-body"),
                 id="confirm-scroll",
                 classes="dialog-body",
             ),
@@ -316,8 +329,8 @@ class ConfirmDeleteScreen(ScrollKeys, DialogScreen[bool]):
         self.keep_memory = not self.keep_memory
         body, line = self.memory_toggle(self.keep_memory)
         self.body = body
-        self.query_one("#confirm-body", Static).update(body)
-        self.query_one("#confirm-memory", Static).update(line)
+        self.query_one("#confirm-body", Static).update(plain(body))
+        self.query_one("#confirm-memory", Static).update(plain(line))
 
 
 class VersionScreen(ScrollKeys, DialogScreen[None]):
@@ -337,7 +350,7 @@ class VersionScreen(ScrollKeys, DialogScreen[None]):
     }
     """
 
-    def __init__(self, body: str) -> None:
+    def __init__(self, body: str | Content) -> None:
         super().__init__()
         self.body = body
 
@@ -349,7 +362,7 @@ class VersionScreen(ScrollKeys, DialogScreen[None]):
             ),
             Vertical(self.footer(), classes="dialog-foot"),
             VerticalScroll(
-                Static(self.body, id="version-body"),
+                Static(plain(self.body), id="version-body"),
                 id="version-scroll",
                 classes="dialog-body",
             ),
@@ -399,11 +412,13 @@ class RenameSessionScreen(DialogScreen[str | None]):
         yield Vertical(
             Vertical(
                 Static(
-                    f"[b]{self.heading}[/b]  {self.session_short}…",
+                    Content.assemble(
+                        (self.heading, "bold"), f"  {self.session_short}…"
+                    ),
                     id="rename-title",
                     classes="dialog-title",
                 ),
-                Static(self.hint, id="rename-hint", classes="dialog-hint"),
+                Static(self.hint, id="rename-hint", classes="dialog-hint", markup=False),
                 classes="dialog-head",
             ),
             Vertical(self.footer(), classes="dialog-foot"),
@@ -496,7 +511,7 @@ class ThemePickerScreen(PickerScreen):
                 classes="dialog-head",
             ),
             Vertical(self.footer(), classes="dialog-foot"),
-            OptionList(*options, id="theme-list", classes="dialog-body"),
+            OptionList(*options, id="theme-list", classes="dialog-body", markup=False),
             id="theme-picker-dialog",
             classes="dialog",
         )
@@ -568,8 +583,12 @@ class MoveTargetScreen(PickerScreen):
             )
         yield Vertical(
             Vertical(
-                Static(f"[b]{self._title}[/]", id="move-title", classes="dialog-title"),
-                Static(self.hint, id="move-hint", classes="dialog-hint"),
+                Static(
+                    Content.styled(self._title, "bold"),
+                    id="move-title",
+                    classes="dialog-title",
+                ),
+                Static(self.hint, id="move-hint", classes="dialog-hint", markup=False),
                 classes="dialog-head",
             ),
             Vertical(
@@ -580,7 +599,7 @@ class MoveTargetScreen(PickerScreen):
                 self.footer(),
                 classes="dialog-foot",
             ),
-            OptionList(*options, id="move-list", classes="dialog-body"),
+            OptionList(*options, id="move-list", classes="dialog-body", markup=False),
             id="move-dialog",
             classes="dialog",
         )
@@ -648,7 +667,9 @@ class AgentPickerScreen(PickerScreen):
         yield Vertical(
             Vertical(
                 Static(
-                    f"[b]{self._title}[/]", id="agent-picker-title", classes="dialog-title"
+                    Content.styled(self._title, "bold"),
+                    id="agent-picker-title",
+                    classes="dialog-title",
                 ),
                 Static(
                     "Finish MEMORY.md merge with an agent, or save the brief only.",
@@ -658,7 +679,7 @@ class AgentPickerScreen(PickerScreen):
                 classes="dialog-head",
             ),
             Vertical(self.footer(), classes="dialog-foot"),
-            OptionList(*options, id="agent-list", classes="dialog-body"),
+            OptionList(*options, id="agent-list", classes="dialog-body", markup=False),
             id="agent-picker-dialog",
             classes="dialog",
         )

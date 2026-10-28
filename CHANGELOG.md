@@ -38,6 +38,10 @@ OpenCode 2 joins Claude Code, Cursor and Hermes as a fourth agent, aXism switche
 - Agents without a saved choice are detected once (data folder with content, or the command on `PATH`) and switched on or off accordingly, instead of all being switched on; saved choices are never changed, and Claude Code is shown if no agent ends up switched on. The note names the agents found and the ones not detected (in the app as a message, on stderr for other commands); a `settings.json` that cannot be read is never overwritten, and the detected choices then apply to that run only
 - GitHub releases use this changelog's section for the version as their release notes
 
+### Fixed
+
+- Session titles, folders, paths and messages containing square brackets display as written and cannot break the app
+
 ## [0.1.2] — 2026-10-27
 
 ### Added

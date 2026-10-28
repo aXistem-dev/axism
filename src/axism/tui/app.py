@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.content import Content
@@ -72,9 +73,24 @@ MAIN_SCREEN_SCOPES = ("main", "projects", "sessions", "details", "filter")
 INPUT_ACTIONS = frozenset({"back", "next_pane", "previous_pane", "command_palette"})
 REGISTRY_IDS = frozenset(action.id for action in REGISTRY)
 
-# Avoid Rich markup: "[x]" is parsed as a style tag and renders blank.
+# Mark glyphs (a "[x]" box would read as a style tag in markup).
 MARK_ON = "☑"
 MARK_OFF = "☐"
+
+# Styles of aXism's own labels; session text next to them stays plain.
+MUTED = "$text-muted"
+SECONDARY = "$secondary"
+HEADING = "bold $accent"
+TOTAL = "bold $primary"
+
+
+def _cell(text: str) -> Text:
+    """A table cell shown exactly as written (a plain string would be markup)."""
+    return Text(text, no_wrap=True, end="")
+
+
+def _lines(lines: list[Content]) -> Content:
+    return Content("\n").join(lines)
 
 # Short agent labels for the narrow projects pane (full names live in detail).
 AGENT_SHORT: dict[str, str] = {
@@ -358,7 +374,7 @@ class AxisHeader(Widget):
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="header-left"):
-            yield Static(self._label_for_width(120), id="header-brand")
+            yield Static(self._label_for_width(120), id="header-brand", markup=False)
         yield HeaderClock() if self._show_clock else HeaderClockSpace()
 
     def on_mount(self) -> None:
@@ -448,7 +464,7 @@ def _format_session_delete_confirm(
     preview: list[str],
     provider: SessionProvider | None = None,
 ) -> tuple[str, list[str]]:
-    """Return (body markup, warning lines) for the delete confirm dialog."""
+    """Return (body, warning lines) for the delete confirm dialog."""
     warnings: list[str] = []
     for s, plan in zip(targets, plans, strict=False):
         live = plan.live
@@ -459,11 +475,14 @@ def _format_session_delete_confirm(
             f"{s.session_id[:8]}…  {live.kind}/{live.state}{pid} — will stop/kill first"
         )
 
-    lines: list[str] = [
-        f"[b]{len(targets)} session(s)[/b] will be permanently removed from disk.",
-        "Protected items (credentials, settings, skills, memory) are kept.",
-        "",
-        "[b]Targets[/b]",
+    lines: list[Content] = [
+        Content.assemble(
+            (f"{len(targets)} session(s)", "bold"),
+            " will be permanently removed from disk.",
+        ),
+        Content("Protected items (credentials, settings, skills, memory) are kept."),
+        Content(""),
+        Content.styled("Targets", "bold"),
     ]
     total = 0
     for s, plan in zip(targets, plans, strict=False):
@@ -477,32 +496,40 @@ def _format_session_delete_confirm(
             if live.pid is not None:
                 live_bit += f" pid={live.pid}"
         lines.append(
-            f"  {s.session_id[:8]}…  {_fmt_size(plan.inventory.total_bytes)}"
-            f"  {nfrag} fragments{live_bit}"
+            Content(
+                f"  {s.session_id[:8]}…  {_fmt_size(plan.inventory.total_bytes)}"
+                f"  {nfrag} fragments{live_bit}"
+            )
         )
-        lines.append(f"    {title}")
-    lines.append("")
-    lines.append(f"[b]Total[/b]  {_fmt_size(total)} across {len(targets)} session(s)")
-    lines.append("")
-    lines.append("[b]Will[/b]")
-    for a in preview[:40]:
-        lines.append(f"  {a}")
+        lines.append(Content(f"    {title}"))
+    lines.append(Content(""))
+    lines.append(
+        Content.assemble(
+            ("Total", "bold"), f"  {_fmt_size(total)} across {len(targets)} session(s)"
+        )
+    )
+    lines.append(Content(""))
+    lines.append(Content.styled("Will", "bold"))
+    lines.extend(Content(f"  {a}") for a in preview[:40])
     if len(preview) > 40:
-        lines.append(f"  … +{len(preview) - 40} more")
-    return "\n".join(lines), warnings
+        lines.append(Content(f"  … +{len(preview) - 40} more"))
+    return _lines(lines), warnings
 
 
-def _memory_line(n_projects: int, keep: bool) -> str:
+def _memory_line(n_projects: int, keep: bool) -> Content:
     """One sentence saying exactly what happens to each project's ``memory/``."""
     what = "its memory/ folder" if n_projects == 1 else "their memory/ folders"
     if keep:
-        return (
+        return Content.assemble(
             f"Project memory is KEPT: {what} stays on disk, "
-            "everything else in the project is deleted.  [b]m[/b] to delete it too."
+            "everything else in the project is deleted.  ",
+            ("m", "bold"),
+            " to delete it too.",
         )
-    return (
-        f"Project memory is DELETED: {what} is removed with the project.  "
-        "[b]m[/b] to keep it."
+    return Content.assemble(
+        f"Project memory is DELETED: {what} is removed with the project.  ",
+        ("m", "bold"),
+        " to keep it.",
     )
 
 
@@ -515,10 +542,12 @@ def _format_project_delete_confirm(
     ``projects`` items are ``(slug, cwd, plan, preview_actions)``.
     """
     warnings: list[str] = []
-    lines: list[str] = [
-        f"[b]{len(projects)} project(s)[/b] will be permanently removed.",
-        "Protected items (credentials, settings, skills) are kept.",
-        "",
+    lines: list[Content] = [
+        Content.assemble(
+            (f"{len(projects)} project(s)", "bold"), " will be permanently removed."
+        ),
+        Content("Protected items (credentials, settings, skills) are kept."),
+        Content(""),
     ]
     for slug, cwd, plan, preview in projects:
         live_n = 0
@@ -532,42 +561,62 @@ def _format_project_delete_confirm(
                     f"{live.kind}/{live.state}{pid} — will stop/kill"
                 )
         n_sess = len(getattr(plan, "session_plans", []) or [])
-        lines.append(f"[b]Project[/b]  {slug}")
-        lines.append(f"cwd: {cwd or '-'}")
-        lines.append(f"Sessions inside: {n_sess}")
+        lines.append(Content.assemble(("Project", "bold"), f"  {slug}"))
+        lines.append(Content(f"cwd: {cwd or '-'}"))
+        lines.append(Content(f"Sessions inside: {n_sess}"))
         if live_n:
             warnings.insert(
                 0,
                 f"{slug}: {live_n} live session(s) will be stopped/killed first",
             )
-        lines.append("")
-        lines.append("[b]Will[/b]")
-        for a in preview[:40]:
-            lines.append(f"  {a}")
+        lines.append(Content(""))
+        lines.append(Content.styled("Will", "bold"))
+        lines.extend(Content(f"  {a}") for a in preview[:40])
         if len(preview) > 40:
-            lines.append(f"  … +{len(preview) - 40} more")
-        lines.append("")
-    return "\n".join(lines).rstrip(), warnings
+            lines.append(Content(f"  … +{len(preview) - 40} more"))
+        lines.append(Content(""))
+    while lines and not lines[-1].plain:
+        lines.pop()
+    return _lines(lines), warnings
+
+
+def _format_stop_confirm(targets: list[tuple[SessionMeta, LiveSession]]) -> Content:
+    """The stop dialog's body: how many sessions stop, then one line each."""
+    lines: list[Content] = [
+        Content.assemble((f"{len(targets)} live session(s)", "bold"), " will be stopped."),
+        Content(""),
+        Content.styled("Targets", "bold"),
+    ]
+    for s, live in targets:
+        title = s.display_title.replace("\n", " ")[:44]
+        short = live.daemon_short or s.session_id[:8]
+        lines.append(Content(f"  {short}  {live.kind}/{live.state}  {title}"))
+    return _lines(lines)
 
 
 class DetailPane(VerticalScroll):
     """Right pane: a focusable scroll view around the details text."""
 
-    def __init__(self, content: str = "", *, id: str | None = None) -> None:
+    def __init__(self, content: Content | None = None, *, id: str | None = None) -> None:
         super().__init__(id=id)
-        self._body = Static(content, id="detail-body")
+        self._body = Static(content or Content(""), id="detail-body")
         self.subject: str | None = None
 
     def compose(self) -> ComposeResult:
         yield self._body
 
-    def update(self, content: str | Content, *, subject: str | None = None) -> None:
-        """Replace the details text (markup string, or ``Content`` for session text).
+    def update(self, content: Content, *, subject: str | None = None) -> None:
+        """Replace the details text.
+
+        Only ``Content`` is taken: session titles, folders and agent text go
+        in as plain parts, so nothing in them is ever read as markup.
 
         ``subject`` names what is shown (a session or project key). The pane
         goes back to the top only when the subject changes, so re-rendering
         the same session (refresh, marks, a finished load) keeps the place.
         """
+        if not isinstance(content, Content):
+            raise TypeError("DetailPane.update takes Content, not a markup string")
         self._body.update(content)
         if subject is None or subject != self.subject:
             self.scroll_home(animate=False)
@@ -817,9 +866,9 @@ class SessionManagerApp(App[None]):
                     placeholder="/ filter · . sort",
                     id="sessions-filter",
                 )
-            yield DetailPane("Select a session  ·  ? help", id="detail")
+            yield DetailPane(Content("Select a session  ·  ? help"), id="detail")
         yield Static("", id="status")
-        yield Static("", id="toast")
+        yield Static("", id="toast", markup=False)
         yield ContextFooter(id="footer")
 
     def on_mount(self) -> None:
@@ -947,7 +996,7 @@ class SessionManagerApp(App[None]):
             self._reload_sessions_table()
 
     def _on_theme_changed(self, _theme: object) -> None:
-        """Re-render detail so markup CSS variables pick up the new theme."""
+        """Re-render detail so its theme variables pick up the new theme."""
         self._show_detail()
 
     def _sync_pane_focus_classes(self) -> None:
@@ -1327,7 +1376,7 @@ class SessionManagerApp(App[None]):
     def _update_sessions_meta(self) -> None:
         meta = self.query_one("#sessions-meta", Static)
         if not self.selected_project:
-            meta.update("[$text-muted]/ filter · . sort[/]")
+            meta.update(Content.styled("/ filter · . sort", MUTED))
             return
         total = len(self.selected_project.sessions)
         shown = len(self._visible_sessions())
@@ -1335,8 +1384,11 @@ class SessionManagerApp(App[None]):
         filt_bit = f'filter="{filt}"  ' if filt else ""
         count = f"{shown}/{total}" if filt or shown != total else str(total)
         meta.update(
-            f"[$text-muted]{count} · {filt_bit}sort: {self._session_sort_label()}  "
-            f"(/ filter · . sort)[/]"
+            Content.styled(
+                f"{count} · {filt_bit}sort: {self._session_sort_label()}  "
+                "(/ filter · . sort)",
+                MUTED,
+            )
         )
 
     def _target_projects(self) -> list[ProjectInfo]:
@@ -1434,20 +1486,22 @@ class SessionManagerApp(App[None]):
             pane, pane
         )
         if self._multi_agent():
-            agent_bit = f"[$text-muted]{len(self.providers)} agents[/]"
-            root_bit = f"[$text-muted]{roots_summary(self.providers)}[/]"
+            agent_bit = Content.styled(f"{len(self.providers)} agents", MUTED)
+            root_bit = Content.styled(roots_summary(self.providers), MUTED)
         else:
-            agent_bit = f"[$text-muted]{self.provider.label}[/]"
-            root_bit = f"[$text-muted]{self.root}[/]"
+            agent_bit = Content.styled(self.provider.label, MUTED)
+            root_bit = Content.styled(str(self.root), MUTED)
         bits = [
-            f"[b $accent]{pane_label}[/]",
-            f"mark {len(self.selected_project_slugs)}p/{len(self.selected_session_ids)}s",
+            Content.styled(pane_label, HEADING),
+            Content(
+                f"mark {len(self.selected_project_slugs)}p/{len(self.selected_session_ids)}s"
+            ),
             agent_bit,
             root_bit,
         ]
         if extra:
-            bits.append(extra)
-        self.query_one("#status", Static).update("  ·  ".join(bits))
+            bits.append(Content(extra))
+        self.query_one("#status", Static).update(Content("  ·  ").join(bits))
         self.refresh_bindings()
         self._refresh_footer()
 
@@ -1461,6 +1515,7 @@ class SessionManagerApp(App[None]):
         self._refresh_status(extra=text)
 
     def _show_toast(self, message: str, *, success: bool, seconds: float = 4.0) -> None:
+        """One line of plain text (titles, paths and agent messages as written)."""
         toast = self.query_one("#toast", Static)
         toast.remove_class("-success", "-error")
         toast.add_class("-success" if success else "-error")
@@ -1482,10 +1537,7 @@ class SessionManagerApp(App[None]):
             targets = [p for p in self.projects if p.key in self.selected_project_slugs]
             if not targets:
                 targets = [self.selected_project] if self.selected_project else []
-            lines = [
-                f"[b $accent]{len(targets)} projects selected[/]",
-                "",
-            ]
+            lines = [Content.styled(f"{len(targets)} projects selected", HEADING), Content("")]
             total_sess = 0
             total_bytes = 0
             for p in targets:
@@ -1494,26 +1546,41 @@ class SessionManagerApp(App[None]):
                 mark = MARK_ON if p.key in self.selected_project_slugs else MARK_OFF
                 agent = self._agent_label(p.provider)
                 lines.append(
-                    f"{mark} [$secondary]{agent}[/]  "
-                    f"[$secondary]{p.cwd_guess[:36]}[/]  "
-                    f"[$text-muted]{p.session_count} sess · {_fmt_size(p.total_bytes)}[/]"
+                    Content.assemble(
+                        f"{mark} ",
+                        (agent, SECONDARY),
+                        "  ",
+                        (p.cwd_guess[:36], SECONDARY),
+                        "  ",
+                        (f"{p.session_count} sess · {_fmt_size(p.total_bytes)}", MUTED),
+                    )
                 )
-            lines.append("")
+            lines.append(Content(""))
             lines.append(
-                f"[b $primary]Total[/]  {total_sess} sessions · {_fmt_size(total_bytes)}"
+                Content.assemble(
+                    ("Total", TOTAL), f"  {total_sess} sessions · {_fmt_size(total_bytes)}"
+                )
             )
-            lines.append("")
+            lines.append(Content(""))
             lines.append(
-                "[$text-muted]m/M Move · d/D Delete project · Space toggle mark · Tab to sessions[/]"
+                Content.styled(
+                    "m/M Move · d/D Delete project · Space toggle mark · Tab to sessions",
+                    MUTED,
+                )
             )
-            detail.update("\n".join(lines), subject="projects:marked")
+            detail.update(_lines(lines), subject="projects:marked")
             return
 
         p = self.selected_project
         if not p:
             detail.update(
-                "[$text-muted]Select a project[/]\n\n"
-                "[$text-muted]Tab panes · ? help · , settings[/]"
+                _lines(
+                    [
+                        Content.styled("Select a project", MUTED),
+                        Content(""),
+                        Content.styled("Tab panes · ? help · , settings", MUTED),
+                    ]
+                )
             )
             return
 
@@ -1524,22 +1591,23 @@ class SessionManagerApp(App[None]):
             and (lv.is_killable or lv.kind == "background")
         )
         marked = p.key in self.selected_project_slugs
+
+        def fact(label: str, value: str | Content) -> Content:
+            return Content.assemble((f"{label:<9}", MUTED), value)
+
         lines = [
-            f"[b $accent]{p.cwd_guess}[/]",
-            f"[$text-muted]agent[/]    [$secondary]{self._agent_label(p.provider)}[/]",
-            f"[$text-muted]slug[/]     [$secondary]{p.slug}[/]",
-            f"[$text-muted]path[/]     [$text-muted]{p.path}[/]",
-            f"[$text-muted]sessions[/] {p.session_count}",
-            f"[$text-muted]size[/]     {_fmt_size(p.total_bytes)}",
-            f"[$text-muted]live/bg[/]  {live_n}",
-            (
-                f"[$text-muted]selected[/] "
-                f"{'[$text-success]yes[/]' if marked else 'no'}"
-            ),
-            "",
-            "[$text-muted]m/M Move · d/D Delete project · Tab/→ sessions[/]",
+            Content.styled(p.cwd_guess, HEADING),
+            fact("agent", Content.styled(self._agent_label(p.provider), SECONDARY)),
+            fact("slug", Content.styled(p.slug, SECONDARY)),
+            fact("path", Content.styled(str(p.path), MUTED)),
+            fact("sessions", str(p.session_count)),
+            fact("size", _fmt_size(p.total_bytes)),
+            fact("live/bg", str(live_n)),
+            fact("selected", Content.styled("yes", "$text-success") if marked else "no"),
+            Content(""),
+            Content.styled("m/M Move · d/D Delete project · Tab/→ sessions", MUTED),
         ]
-        detail.update("\n".join(lines), subject=f"project:{p.key}")
+        detail.update(_lines(lines), subject=f"project:{p.key}")
 
     def _reload_projects_table(self) -> None:
         table = self.query_one("#projects", DataTable)
@@ -1569,7 +1637,7 @@ class SessionManagerApp(App[None]):
                 cells.append(str(min(p.session_count, 999)))
             if layout.show_size:
                 cells.append(_ellipsis(_fmt_size(p.total_bytes), 5))
-            table.add_row(*cells, key=p.key)
+            table.add_row(*map(_cell, cells), key=p.key)
             if keep_key and p.key == keep_key:
                 focus_row = i
         if self.projects:
@@ -1590,9 +1658,14 @@ class SessionManagerApp(App[None]):
             self._update_sessions_meta()
             roots = roots_summary(self.providers) or str(self.root)
             self.query_one("#detail", DetailPane).update(
-                "[b]No projects found[/b]\n\n"
-                f"Config root(s): {roots}\n"
-                "Press r to refresh · , settings · ? for help"
+                _lines(
+                    [
+                        Content.styled("No projects found", "bold"),
+                        Content(""),
+                        Content(f"Config root(s): {roots}"),
+                        Content("Press r to refresh · , settings · ? for help"),
+                    ]
+                )
             )
 
     def _update_project_marks(self) -> None:
@@ -1600,7 +1673,7 @@ class SessionManagerApp(App[None]):
         for p in self.projects:
             mark = MARK_ON if p.key in self.selected_project_slugs else MARK_OFF
             try:
-                table.update_cell(p.key, "Sel", mark)
+                table.update_cell(p.key, "Sel", _cell(mark))
             except Exception:
                 self._reload_projects_table()
                 return
@@ -1638,7 +1711,7 @@ class SessionManagerApp(App[None]):
                 cells.append(_ellipsis(_fmt_size(s.size_bytes), 5))
             if layout.show_tags:
                 cells.append(_ellipsis(_badges(s, live), layout.tags_width))
-            table.add_row(*cells, key=s.key)
+            table.add_row(*map(_cell, cells), key=s.key)
             if keep_id and (s.key == keep_id or s.session_id == keep_id):
                 focus_row = i
                 found = True
@@ -1659,7 +1732,7 @@ class SessionManagerApp(App[None]):
         for s in self._visible_sessions():
             mark = MARK_ON if s.key in self.selected_session_ids else MARK_OFF
             try:
-                table.update_cell(s.key, "Sel", mark)
+                table.update_cell(s.key, "Sel", _cell(mark))
             except Exception:
                 self._reload_sessions_table(
                     focus_session_id=(
@@ -1687,27 +1760,32 @@ class SessionManagerApp(App[None]):
             targets = []
 
         if len(targets) > 1:
-            lines = [
-                f"[b $accent]{len(targets)} sessions selected[/]",
-                "",
-            ]
+            lines = [Content.styled(f"{len(targets)} sessions selected", HEADING), Content("")]
             total = 0
             for s in targets:
                 total += s.size_bytes
                 mark = MARK_ON if s.key in self.selected_session_ids else MARK_OFF
                 agent = self._agent_label(s.provider)
                 lines.append(
-                    f"{mark} [$secondary]{agent}[/]  "
-                    f"[$secondary]{s.session_id[:8]}…[/]  "
-                    f"[$text-muted]{_fmt_size(s.size_bytes)}[/]  "
-                    f"{s.display_title[:40]}"
+                    Content.assemble(
+                        f"{mark} ",
+                        (agent, SECONDARY),
+                        "  ",
+                        (f"{s.session_id[:8]}…", SECONDARY),
+                        "  ",
+                        (_fmt_size(s.size_bytes), MUTED),
+                        "  ",
+                        s.display_title[:40],
+                    )
                 )
-            lines.append("")
+            lines.append(Content(""))
             lines.append(
-                f"[b $primary]Total[/]  {_fmt_size(total)} across {len(targets)} session(s)"
+                Content.assemble(
+                    ("Total", TOTAL), f"  {_fmt_size(total)} across {len(targets)} session(s)"
+                )
             )
             self._detail_session = None
-            detail.update("\n".join(lines), subject="sessions:marked")
+            detail.update(_lines(lines), subject="sessions:marked")
             return
 
         s = targets[0] if targets else self.selected_session
@@ -1715,7 +1793,7 @@ class SessionManagerApp(App[None]):
             if self.selected_project and not self.selected_project.sessions:
                 self._show_project_detail()
                 return
-            detail.update("[$text-muted]Select a session[/]")
+            detail.update(Content.styled("Select a session", MUTED))
             return
         self._detail_session = s
         detail.update(self._session_detail_text(s), subject=f"session:{s.key}")
@@ -2052,36 +2130,33 @@ class SessionManagerApp(App[None]):
             textual_ver = getattr(textual, "__version__", "?")
         except Exception:
             textual_ver = "?"
+        def fact(label: str, value: str) -> Content:
+            return Content.assemble((f"{label:<10}", MUTED), value)
+
         lines = [
-            f"[b $accent]aXism[/]  v{version_string()}",
-            "[$text-muted]Agent Interactive Session Manager[/]",
-            "",
+            Content.assemble(("aXism", HEADING), f"  v{version_string()}"),
+            Content.styled("Agent Interactive Session Manager", MUTED),
+            Content(""),
         ]
         if __commit__:
-            lines.append(f"[$text-muted]Commit[/]    {__commit__}")
+            lines.append(fact("Commit", __commit__))
         lines.extend(
             [
-                f"[$text-muted]Python[/]    {sys.version.split()[0]}",
-                f"[$text-muted]Textual[/]   {textual_ver}",
-                f"[$text-muted]Platform[/]  {platform.system()} {platform.release()}",
-                f"[$text-muted]Machine[/]   {platform.machine()}",
-                "",
-                (
-                    "[$text-muted]Providers[/] "
-                    + ", ".join(f"{p.label}" for p in self.providers)
-                ),
-                f"[$text-muted]Config[/]    {roots_summary(self.providers)}",
-                f"[$text-muted]Settings[/]  {settings_path()}",
-                f"[$text-muted]Theme[/]     {self.theme}",
-                "",
-                f"[$text-muted]Projects[/]  {len(self.projects)}",
-                (
-                    f"[$text-muted]Sessions[/]  "
-                    f"{sum(p.session_count for p in self.projects)}"
-                ),
+                fact("Python", sys.version.split()[0]),
+                fact("Textual", textual_ver),
+                fact("Platform", f"{platform.system()} {platform.release()}"),
+                fact("Machine", platform.machine()),
+                Content(""),
+                fact("Providers", ", ".join(p.label for p in self.providers)),
+                fact("Config", roots_summary(self.providers)),
+                fact("Settings", str(settings_path())),
+                fact("Theme", str(self.theme)),
+                Content(""),
+                fact("Projects", str(len(self.projects))),
+                fact("Sessions", str(sum(p.session_count for p in self.projects))),
             ]
         )
-        self.push_screen(VersionScreen("\n".join(lines)))
+        self.push_screen(VersionScreen(_lines(lines)))
 
     def action_stop_sessions(self) -> None:
         """Stop background sessions (same as typing ``/stop`` while attached)."""
@@ -2093,18 +2168,7 @@ class SessionManagerApp(App[None]):
             "Stops each session via its agent tool.",
             "Conversation/transcript is kept; use Delete to remove files.",
         ]
-        lines = [
-            f"[b]{len(targets)} live session(s)[/b] will be stopped.",
-            "",
-            "[b]Targets[/b]",
-        ]
-        for s, live in targets:
-            title = s.display_title.replace("\n", " ")[:44]
-            short = live.daemon_short or s.session_id[:8]
-            lines.append(
-                f"  {short}  {live.kind}/{live.state}  {title}"
-            )
-        body = "\n".join(lines)
+        body = _format_stop_confirm(targets)
 
         def _after(confirmed: bool | None) -> None:
             if not confirmed:
@@ -2327,18 +2391,20 @@ class SessionManagerApp(App[None]):
                         self._offer_memory_agent_handoff(result)
 
                 body_lines = [
-                    f"[b]{n} project(s)[/b] → [$secondary]{dest}[/]",
-                    f"[$text-muted]via {provider.label}[/]",
-                    "",
-                    "[b]Sources[/b]",
+                    Content.assemble(
+                        (f"{n} project(s)", "bold"), " → ", (dest, SECONDARY)
+                    ),
+                    Content.styled(f"via {provider.label}", MUTED),
+                    Content(""),
+                    Content.styled("Sources", "bold"),
                 ]
                 for p in targets:
                     body_lines.append(
-                        f"  {p.cwd_guess}  ({p.session_count} sessions)"
+                        Content(f"  {p.cwd_guess}  ({p.session_count} sessions)")
                     )
                 self.push_screen(
                     ConfirmDeleteScreen(
-                        "\n".join(body_lines),
+                        _lines(body_lines),
                         title=title,
                         warnings=[
                             "Renames or merges the backend's project directory.",
@@ -2437,22 +2503,24 @@ class SessionManagerApp(App[None]):
                     self._show_toast(msg, success=ok, seconds=5)
 
                 body_lines = [
-                    f"[b]{n} session(s)[/b] → [$secondary]{dest}[/]",
-                    (
-                        f"[$text-muted]{provider.label} → {dest_provider.label} "
-                        f"(copy, source kept)[/]"
-                        if is_cross
-                        else f"[$text-muted]via {provider.label} (relocate)[/]"
+                    Content.assemble(
+                        (f"{n} session(s)", "bold"), " → ", (dest, SECONDARY)
                     ),
-                    "",
-                    "[b]Targets[/b]",
+                    Content.styled(
+                        f"{provider.label} → {dest_provider.label} (copy, source kept)"
+                        if is_cross
+                        else f"via {provider.label} (relocate)",
+                        MUTED,
+                    ),
+                    Content(""),
+                    Content.styled("Targets", "bold"),
                 ]
                 for s in sessions[:30]:
                     body_lines.append(
-                        f"  {s.session_id[:8]}…  {s.display_title[:40]}"
+                        Content(f"  {s.session_id[:8]}…  {s.display_title[:40]}")
                     )
                 if n > 30:
-                    body_lines.append(f"  … +{n - 30} more")
+                    body_lines.append(Content(f"  … +{n - 30} more"))
                 warnings = (
                     [
                         "Cross-agent copy keeps the source session.",
@@ -2470,7 +2538,7 @@ class SessionManagerApp(App[None]):
                 )
                 self.push_screen(
                     ConfirmDeleteScreen(
-                        "\n".join(body_lines),
+                        _lines(body_lines),
                         title=("Copy to other agent" if is_cross else title),
                         warnings=warnings,
                         confirm_verb=("Copy" if is_cross else "Move"),
@@ -2546,10 +2614,14 @@ class SessionManagerApp(App[None]):
             )
 
         if over:
-            body = (
-                f"[b]Memory merge exceeds handoff limits[/]\n\n"
-                f"{stats.summary() if stats else ''}\n\n"
-                "You can still force an agent handoff, or skip."
+            body = _lines(
+                [
+                    Content.styled("Memory merge exceeds handoff limits", "bold"),
+                    Content(""),
+                    Content(stats.summary() if stats else ""),
+                    Content(""),
+                    Content("You can still force an agent handoff, or skip."),
+                ]
             )
 
             def _after_force(confirmed: bool | None) -> None:
@@ -2644,7 +2716,7 @@ class SessionManagerApp(App[None]):
             for p in projects
         ]
 
-        def _build(keep: bool) -> tuple[str, list[str]]:
+        def _build(keep: bool) -> tuple[Content, list[str]]:
             packed: list[tuple[str, str, object, list[str]]] = []
             for p, base in zip(projects, plans_preview, strict=True):
                 plan = replace(base, keep_memory=keep)
@@ -2685,7 +2757,7 @@ class SessionManagerApp(App[None]):
 
         n = len(projects)
 
-        def _memory(keep: bool) -> tuple[str, str]:
+        def _memory(keep: bool) -> tuple[Content, Content]:
             return _build(keep)[0], _memory_line(n, keep)
 
         screen = ConfirmDeleteScreen(
