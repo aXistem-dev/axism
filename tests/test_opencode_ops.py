@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from axism.actions import is_failure_line
 from axism.providers.base import UnsupportedOperation
 from axism.providers.opencode_store import ops
 from axism.providers.opencode_store.discover import SessionRow
@@ -272,7 +273,10 @@ def test_api_success_requires_json_and_no_error(oc_root: Path, cli: FakeCLI):
     assert not ok and "JSON" in msg
     # exit != 0 without a body (unknown route)
     cli.on("GET", "/api/nope", (1, "", "HTTP 404 Not Found\n"))
-    assert ops.api(oc_root, "GET", "/api/nope") == (False, "HTTP 404 Not Found")
+    assert ops.api(oc_root, "GET", "/api/nope") == (
+        False,
+        "error: opencode api GET /api/nope failed: HTTP 404 Not Found",
+    )
     # multi-line envelope message is collapsed
     cli.on(
         "GET",
@@ -295,7 +299,7 @@ def test_api_unsupported_root_reports_failure(tmp_path: Path, cli: FakeCLI):
     odd = tmp_path / "my-sessions"
     odd.mkdir()
     ok, msg = ops.api(odd, "GET", "/api/info")
-    assert not ok and msg.startswith("unsupported:")
+    assert not ok and msg.startswith("refused:")
     assert cli.calls == []
 
 
@@ -584,7 +588,10 @@ def test_import_new_id_from_output_then_failure(
     )
     ok, msg, new_id = ops.import_session(oc_root, transfer, DEST, session_id=SID)
     assert (ok, new_id) == (False, "")
-    assert msg == "Error: Failed to import session: Bad Request"
+    assert msg == (
+        "error: import into OpenCode failed: "
+        "Error: Failed to import session: Bad Request"
+    )
     # exit 0 but no confirmation line
     cli.on("session", "import", (0, "", ""))
     assert not ops.import_session(oc_root, transfer, DEST, session_id=SID)[0]
@@ -608,7 +615,7 @@ def test_import_via_service_and_unsupported_root(
     odd.mkdir()
     n = len(cli.calls)
     ok, msg, _ = ops.import_session(odd, transfer, DEST, session_id=SID)
-    assert not ok and msg.startswith("unsupported:")
+    assert not ok and msg.startswith("refused:")
     assert len(cli.calls) == n
 
 
@@ -632,3 +639,198 @@ def test_open_argv_default_custom_and_unsupported(oc_root: Path, tmp_path: Path)
     odd.mkdir()
     with pytest.raises(UnsupportedOperation):
         ops.open_argv(odd, SID, CWD)
+
+
+# --- every failure is recognised as a failure line ------------------------------------
+
+
+def _odd(tmp: Path) -> Path:
+    odd = tmp / "alt" / "my-sessions"
+    odd.mkdir(parents=True, exist_ok=True)
+    return odd
+
+
+def _custom(tmp: Path) -> Path:
+    custom = tmp / "alt" / "opencode"
+    custom.mkdir(parents=True, exist_ok=True)
+    return custom
+
+
+def _transfer(tmp: Path) -> Path:
+    path = tmp / "transfer.json"
+    path.write_text("{}")
+    return path
+
+
+def _gone(cli: FakeCLI, method: str = "GET", path: str = f"/api/session/{SID}") -> None:
+    cli.on(method, path, (1, not_found(SID), "HTTP 404 Not Found"))
+
+
+def _service_ok(cli: FakeCLI) -> None:
+    cli.on("GET", "/api/info", (0, server_info(SERVICE_PID), ""))
+    _ok_session(cli)
+
+
+FAILURES = {
+    # api
+    "api odd root": lambda t, r, c: ops.api(_odd(t), "GET", "/api/info"),
+    "api http error": lambda t, r, c: (
+        _gone(c),
+        ops.api(r, "GET", f"/api/session/{SID}"),
+    )[-1],
+    "api error envelope exit 0": lambda t, r, c: (
+        c.on("GET", "/x", (0, not_found(SID), "")),
+        ops.api(r, "GET", "/x"),
+    )[-1],
+    "api not json": lambda t, r, c: (
+        c.on("GET", "/doc", (0, "<html></html>", "")),
+        ops.api(r, "GET", "/doc"),
+    )[-1],
+    "api no body error": lambda t, r, c: (
+        c.on("GET", "/nope", (1, "", "HTTP 404 Not Found")),
+        ops.api(r, "GET", "/nope"),
+    )[-1],
+    "api timeout": lambda t, r, c: (
+        c.on("GET", "/slow", (124, "", "opencode timed out")),
+        ops.api(r, "GET", "/slow"),
+    )[-1],
+    "api missing binary": "missing-binary-api",
+    # verify
+    "verify odd root": lambda t, r, c: ops.verify_session(_odd(t), _row()),
+    "verify bad id": lambda t, r, c: ops.verify_session(r, _row(id="../etc")),
+    "verify 404": lambda t, r, c: (_gone(c), ops.verify_session(r, _row()))[-1],
+    "verify project mismatch": lambda t, r, c: (
+        _ok_session(c),
+        ops.verify_session(r, _row(project_id="2" * 40)),
+    )[-1],
+    "verify missing binary": "missing-binary-verify",
+    # rename
+    "rename odd root": lambda t, r, c: ops.rename_session(_odd(t), _row(), "x"),
+    "rename empty title": lambda t, r, c: ops.rename_session(r, _row(), " "),
+    "rename refused": lambda t, r, c: (_gone(c), ops.rename_session(r, _row(), "x"))[-1],
+    "rename cli error": lambda t, r, c: (
+        _ok_session(c),
+        _gone(c, "PATCH"),
+        ops.rename_session(r, _row(), "x"),
+    )[-1],
+    # delete
+    "delete odd root": lambda t, r, c: ops.delete_session(_odd(t), _row()),
+    "delete refused": lambda t, r, c: (_gone(c), ops.delete_session(r, _row()))[-1],
+    "delete cli error": lambda t, r, c: (
+        _ok_session(c),
+        _gone(c, "DELETE"),
+        ops.delete_session(r, _row()),
+    )[-1],
+    # interrupt
+    "interrupt odd root": lambda t, r, c: ops.interrupt_session(_odd(t), _row()),
+    "interrupt refused": lambda t, r, c: (
+        _gone(c),
+        ops.interrupt_session(r, _row()),
+    )[-1],
+    "interrupt cli error": lambda t, r, c: (
+        _ok_session(c),
+        _gone(c, "POST", f"/api/session/{SID}/interrupt"),
+        ops.interrupt_session(r, _row()),
+    )[-1],
+    "interrupt not running": lambda t, r, c: (
+        _ok_session(c),
+        c.on("POST", f"/api/session/{SID}/interrupt", (0, {"interrupted": False}, "")),
+        ops.interrupt_session(r, _row()),
+    )[-1],
+    # move
+    "move odd root": lambda t, r, c: ops.move_session(_odd(t), _row(), DEST),
+    "move custom root": lambda t, r, c: ops.move_session(_custom(t), _row(), DEST),
+    "move no service": lambda t, r, c: ops.move_session(r, _row(), DEST),
+    "move relative": "service-move-relative",
+    "move refused": "service-move-refused",
+    "move cli error": "service-move-cli-error",
+    "move not applied": "service-move-not-applied",
+    # import
+    "import odd root": lambda t, r, c: ops.import_session(
+        _odd(t), _transfer(t), DEST, session_id=SID
+    ),
+    "import duplicate": lambda t, r, c: (
+        c.on("session", "import", (0, "", "Session already exists")),
+        ops.import_session(r, _transfer(t), DEST, session_id=SID),
+    )[-1],
+    "import bad request": lambda t, r, c: (
+        c.on("session", "import", (1, "", "Error: Failed to import session: Bad Request")),
+        ops.import_session(r, _transfer(t), DEST, session_id=SID),
+    )[-1],
+    "import exit without output": lambda t, r, c: (
+        c.on("session", "import", (3, "", "")),
+        ops.import_session(r, _transfer(t), DEST, session_id=SID),
+    )[-1],
+    "import not confirmed": lambda t, r, c: (
+        c.on("session", "import", (0, "", "")),
+        ops.import_session(r, _transfer(t), DEST, session_id=SID),
+    )[-1],
+    "import timeout": "timeout-import",
+    "import missing binary": "missing-binary-import",
+}
+
+
+def _special(
+    name: str, tmp: Path, root: Path, cli: FakeCLI, monkeypatch: pytest.MonkeyPatch
+):
+    if name.startswith("missing-binary"):
+        monkeypatch.setattr(ops.shutil, "which", lambda b, *a, **k: None)
+        if name.endswith("api"):
+            return ops.api(root, "GET", "/api/info")
+        if name.endswith("verify"):
+            return ops.verify_session(root, _row())
+        return ops.import_session(root, _transfer(tmp), DEST, session_id=SID)
+    if name == "timeout-import":
+
+        def slow(argv, **kwargs):
+            raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
+
+        monkeypatch.setattr(ops.subprocess, "run", slow)
+        return ops.import_session(root, _transfer(tmp), DEST, session_id=SID)
+    # service-backed move paths
+    _service_json(tmp / "xdg-state")
+    monkeypatch.setattr(ops, "pid_alive", lambda pid: pid == SERVICE_PID)
+    monkeypatch.setattr(ops, "read_cmdline", lambda pid: SERVICE_CMD)
+    if name == "service-move-relative":
+        return ops.move_session(root, _row(), "relative/dir", poll_timeout=0)
+    if name == "service-move-refused":
+        cli.on("GET", "/api/info", (0, server_info(1), ""))
+        return ops.move_session(root, _row(), DEST, poll_timeout=0)
+    _service_ok(cli)
+    if name == "service-move-cli-error":
+        _gone(cli, "POST", f"/api/session/{SID}/move")
+    else:
+        cli.on("POST", f"/api/session/{SID}/move", (0, "", ""))
+    return ops.move_session(root, _row(), DEST, poll_interval=0, poll_timeout=0)
+
+
+@pytest.mark.parametrize("case", sorted(FAILURES))
+def test_every_failure_is_a_failure_line(
+    case: str,
+    tmp_path: Path,
+    oc_root: Path,
+    cli: FakeCLI,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    action = FAILURES[case]
+    if isinstance(action, str):
+        result = _special(action, tmp_path, oc_root, cli, monkeypatch)
+    else:
+        result = action(tmp_path, oc_root, cli)
+    ok, message = result[0], result[1]
+    assert ok is False
+    assert message.startswith(("refused: ", "error: ")), message
+    assert is_failure_line(message), message
+
+
+def test_unsupported_operation_message_reads_the_same(tmp_path: Path):
+    odd = _odd(tmp_path)
+    for call in (
+        lambda: ops.choose_server(odd),
+        lambda: ops.run_opencode(odd, ["api", "GET", "/api/info"]),
+        lambda: ops.open_argv(odd, SID, CWD),
+    ):
+        with pytest.raises(UnsupportedOperation) as exc:
+            call()
+        assert str(exc.value) == ops.UNSUPPORTED_ROOT
+        assert is_failure_line(str(exc.value))

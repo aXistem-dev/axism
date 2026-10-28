@@ -39,7 +39,7 @@ from axism.providers.opencode_store.paths import (
 BINARY = "opencode"
 PROCESS_NAMES = {"opencode", "opencode.exe"}
 FOLDER_NAME = "opencode"
-UNSUPPORTED_ROOT = f"the OpenCode data folder must be named '{FOLDER_NAME}'"
+UNSUPPORTED_ROOT = f"refused: the OpenCode data folder must be named '{FOLDER_NAME}'"
 MOVE_NEEDS_SERVICE = (
     "refused: moving OpenCode sessions needs OpenCode's background service — "
     "start it with `opencode service start` and try again"
@@ -174,6 +174,7 @@ def _api(
     params: dict[str, str] | None = None,
     data: dict | None = None,
 ) -> tuple[bool, object]:
+    """Like :func:`api`, but a failure carries only the detail (no prefix)."""
     args = ["api", *choice.flags, method, path]
     for key, value in (params or {}).items():
         args += ["--param", f"{key}={value}"]
@@ -194,7 +195,7 @@ def _api(
     if not text:
         return True, None
     if not parsed:
-        return False, f"{BINARY} api {method} {path} did not return JSON"
+        return False, "the reply was not JSON"
     return True, body
 
 
@@ -214,8 +215,11 @@ def api(
     try:
         choice = choose_server(root)
     except UnsupportedOperation as exc:
-        return False, f"unsupported: {exc}"
-    return _api(choice, method, path, params=params, data=data)
+        return False, str(exc)
+    ok, body = _api(choice, method, path, params=params, data=data)
+    if not ok:
+        return False, f"error: {BINARY} api {method} {path} failed: {body}"
+    return True, body
 
 
 def _session_data(body: object) -> dict | None:
@@ -267,7 +271,7 @@ def verify_session(root: Path, row: SessionRow) -> tuple[bool, str]:
     try:
         choice = choose_server(root)
     except UnsupportedOperation as exc:
-        return False, f"unsupported: {exc}"
+        return False, str(exc)
     return _verify(choice, row)
 
 
@@ -288,7 +292,7 @@ def _checked(root: Path, row: SessionRow) -> tuple[ServerChoice | None, str]:
     try:
         choice = choose_server(root)
     except UnsupportedOperation as exc:
-        return None, f"unsupported: {exc}"
+        return None, str(exc)
     ok, msg = _verify(choice, row)
     return (choice, msg) if ok else (None, msg)
 
@@ -296,13 +300,13 @@ def _checked(root: Path, row: SessionRow) -> tuple[ServerChoice | None, str]:
 def rename_session(root: Path, row: SessionRow, title: str) -> tuple[bool, str]:
     clean = " ".join(title.split())
     if not clean:
-        return False, "title must not be empty"
+        return False, "refused: title must not be empty"
     choice, msg = _checked(root, row)
     if choice is None:
         return False, msg
     ok, body = _api(choice, "PATCH", f"/api/session/{row.id}", data={"title": clean})
     if not ok:
-        return False, f"error: rename of {short_id(row.id)} failed: {body}"
+        return False, f"error: {BINARY} rename of {short_id(row.id)} failed: {body}"
     return True, f"renamed to {clean!r}"
 
 
@@ -312,7 +316,7 @@ def delete_session(root: Path, row: SessionRow) -> tuple[bool, str]:
         return False, msg
     ok, body = _api(choice, "DELETE", f"/api/session/{row.id}")
     if not ok:
-        return False, f"error: delete of {short_id(row.id)} failed: {body}"
+        return False, f"error: {BINARY} delete of {short_id(row.id)} failed: {body}"
     kids = len(row.child_ids)
     extra = f" and {kids} child session{'s' if kids != 1 else ''}" if kids else ""
     return True, f"deleted session {short_id(row.id)}{extra}"
@@ -324,7 +328,7 @@ def interrupt_session(root: Path, row: SessionRow) -> tuple[bool, str]:
         return False, msg
     ok, body = _api(choice, "POST", f"/api/session/{row.id}/interrupt")
     if not ok:
-        return False, f"error: interrupt of {short_id(row.id)} failed: {body}"
+        return False, f"error: {BINARY} interrupt of {short_id(row.id)} failed: {body}"
     if not (isinstance(body, dict) and body.get("interrupted") is True):
         return False, f"error: {short_id(row.id)} was not running on the OpenCode server"
     return True, f"interrupted {short_id(row.id)}"
@@ -360,7 +364,7 @@ def move_session(
     if choice.via != "service":
         return False, MOVE_NEEDS_SERVICE
     if not os.path.isabs(directory):
-        return False, f"error: move destination must be an absolute path: {directory}"
+        return False, f"refused: move destination must be an absolute path: {directory}"
     ok, msg = _verify(choice, row)
     if not ok:
         return False, msg
@@ -372,7 +376,7 @@ def move_session(
         data={"directory": directory, "delivery": "queue"},
     )
     if not ok:
-        return False, f"error: move of {short} failed: {body}"
+        return False, f"error: {BINARY} move of {short} failed: {body}"
     deadline = time.monotonic() + poll_timeout
     while True:
         ok, body = _api(choice, "GET", f"/api/session/{row.id}")
@@ -408,7 +412,7 @@ def import_session(
     try:
         choice = choose_server(root)
     except UnsupportedOperation as exc:
-        return False, f"unsupported: {exc}", ""
+        return False, str(exc), ""
     args = [
         "session",
         "import",
@@ -417,11 +421,15 @@ def import_session(
         "--directory",
         directory,
     ]
+    failed = "error: import into OpenCode failed:"
     rc, out, err = _exec(choice, args, timeout=120.0)
     if "Session already exists" in err or "Session already exists" in out:
-        return False, f"error: an OpenCode session {short_id(session_id)} already exists", ""
+        return False, (
+            f"{failed} a session with id {short_id(session_id)} already exists"
+        ), ""
     if rc != 0:
-        return False, _first_line(err) or _first_line(out) or f"{BINARY} exited with {rc}", ""
+        detail = _first_line(err) or _first_line(out) or f"{BINARY} exited with {rc}"
+        return False, f"{failed} {detail}", ""
     prefix = "Imported session:"
     imported = None
     for line in out.splitlines():
@@ -430,7 +438,7 @@ def import_session(
             imported = line[len(prefix):].strip()
     if imported != session_id:
         return False, (
-            f"error: OpenCode did not confirm importing {short_id(session_id)}"
+            f"{failed} OpenCode did not confirm importing {short_id(session_id)}"
             + (f" ({_first_line(err)})" if _first_line(err) else "")
         ), ""
     return True, f"imported {short_id(session_id)} into {directory}", session_id
