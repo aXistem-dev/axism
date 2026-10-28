@@ -12,6 +12,8 @@ from axism.providers.base import (
 )
 from axism.providers.claude_code import ClaudeCodeProvider, default_provider
 from axism.providers.federation import (
+    DetectionResult,
+    detect_undecided_providers,
     enabled_providers_from_settings,
     federate_discover,
     federate_merge_live,
@@ -33,10 +35,12 @@ __all__ = [
     "PROVIDER_LABELS",
     "Capabilities",
     "ClaudeCodeProvider",
+    "DetectionResult",
     "ProviderBase",
     "SessionProvider",
     "UnsupportedOperation",
     "default_provider",
+    "detect_undecided_providers",
     "enabled_providers_from_settings",
     "federate_discover",
     "federate_merge_live",

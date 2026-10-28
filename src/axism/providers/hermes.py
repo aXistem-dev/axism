@@ -18,7 +18,9 @@ from axism.live import LiveSession
 from axism.move import MoveResult
 from axism.providers.base import Capabilities, ProviderBase
 from axism.providers.common import (
+    binary_on_path,
     exec_with_cwd,
+    file_exists,
     find_agent_sessions,
     remove_path,
     strictly_inside,
@@ -61,6 +63,14 @@ class HermesProvider(ProviderBase):
         self._config_dir = (
             Path(config_dir).expanduser() if config_dir is not None else None
         )
+
+    def detect(self) -> bool:
+        try:
+            return file_exists(self.config_root() / "state.db") or binary_on_path(
+                "hermes"
+            )
+        except OSError:
+            return False
 
     def config_root(self) -> Path:
         if self._config_dir is not None:

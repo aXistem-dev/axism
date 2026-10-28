@@ -26,6 +26,7 @@ from axism.live import (
 from axism.move import MoveResult, move_projects, move_sessions
 from axism.paths import config_root as claude_config_root
 from axism.providers.base import Capabilities, ProviderBase
+from axism.providers.common import binary_on_path, dir_has_content
 from axism.rename import rename_session
 
 
@@ -55,6 +56,14 @@ class ClaudeCodeProvider(ProviderBase):
             self._config_dir = None
         else:
             self._config_dir = Path(config_dir).expanduser()
+
+    def detect(self) -> bool:
+        try:
+            return dir_has_content(self.config_root() / "projects") or binary_on_path(
+                "claude"
+            )
+        except OSError:
+            return False
 
     def config_root(self) -> Path:
         if self._config_dir is not None:

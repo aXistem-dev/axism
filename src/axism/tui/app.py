@@ -27,6 +27,7 @@ from axism.move import MoveResult
 from axism.providers import (
     PROVIDER_LABELS,
     UnsupportedOperation,
+    detect_undecided_providers,
     enabled_providers_from_settings,
     federate_discover,
     federate_merge_live,
@@ -1491,6 +1492,8 @@ class SessionManagerApp(App[None]):
     def __init__(self) -> None:
         super().__init__()
         self._axism_settings = load_settings()
+        detection = detect_undecided_providers(self._axism_settings)
+        self._detection_message = detection.message() if detection.changed else ""
         self.providers = enabled_providers_from_settings(self._axism_settings)
         self.provider = (
             provider_by_name(self.providers, self._axism_settings.active_provider)
@@ -1548,6 +1551,8 @@ class SessionManagerApp(App[None]):
         self._sync_pane_focus_classes()
         self._sync_narrow_class()
         self.action_refresh()
+        if self._detection_message:
+            self._show_toast(self._detection_message, success=True, seconds=8.0)
         # The first pass runs before the tables have a real size; plan again.
         self.call_after_refresh(self._refit_tables)
 

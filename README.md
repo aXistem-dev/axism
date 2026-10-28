@@ -64,7 +64,7 @@ Terminals narrower than 70 columns hide the details pane so projects and session
 
 **Moving.** Press `m`, then pick an existing project or type a folder path. Within the same agent, aXism moves the session files and updates their recorded paths. It creates the destination folder if needed, but it never moves your source code. Stop running sessions before moving them. Moving a session into another agent's project copies the conversation text and keeps the original.
 
-**Settings.** Press `,` to choose which agents to include (`Space`), set the default agent for CLI commands (`Enter` saves and makes the highlighted one the default), and point an agent at a custom config folder. Settings are saved in `~/.config/axism/settings.json` (or under `$AXISM_CONFIG_DIR`).
+**Settings.** Press `,` to choose which agents to include (`Space`), set the default agent for CLI commands (`Enter` saves and makes the highlighted one the default), and point an agent at a custom config folder. On first launch aXism switches on the agents it finds on the machine (a data folder with content, or the agent's command on your `PATH`); agents added by a later update are detected once, and your own choices are kept. Settings are saved in `~/.config/axism/settings.json` (or under `$AXISM_CONFIG_DIR`).
 
 ## Command line
 

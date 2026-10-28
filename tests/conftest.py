@@ -175,3 +175,9 @@ def _no_real_agent_binary(monkeypatch: pytest.MonkeyPatch) -> None:
         return _REAL_WHICH(cmd, *args, **kwargs)
 
     monkeypatch.setattr(shutil, "which", which)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_axism_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Detection writes settings; never let a test reach the real config dir."""
+    monkeypatch.setenv("AXISM_CONFIG_DIR", str(tmp_path / "axism-config-default"))

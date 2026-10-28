@@ -54,6 +54,10 @@ class SessionProvider(Protocol):
         """Root directory where this provider stores sessions."""
         ...
 
+    def detect(self) -> bool:
+        """Whether this agent appears to be installed or used on this machine."""
+        ...
+
     def discover(self, root: Path | None = None) -> list[ProjectInfo]:
         ...
 
@@ -180,6 +184,9 @@ class ProviderBase:
         fragments=False,
     )
     config_hint = ""
+
+    def detect(self) -> bool:
+        return False
 
     def _unsupported(self, operation: str) -> UnsupportedOperation:
         return UnsupportedOperation(f"{self.label} does not support {operation}")

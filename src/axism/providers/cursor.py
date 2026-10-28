@@ -14,6 +14,8 @@ from axism.move import MoveResult
 from axism.paths import path_size, strictly_inside
 from axism.providers.base import Capabilities, ProviderBase
 from axism.providers.common import (
+    binary_on_path,
+    dir_has_content,
     exec_with_cwd,
     execute_fragment_deletes,
     remove_path,
@@ -61,6 +63,17 @@ class CursorProvider(ProviderBase):
         self._config_dir = (
             Path(config_dir).expanduser() if config_dir is not None else None
         )
+
+    def detect(self) -> bool:
+        try:
+            root = self.config_root()
+            return (
+                dir_has_content(projects_dir(root))
+                or dir_has_content(chats_dir(root))
+                or binary_on_path("cursor-agent")
+            )
+        except OSError:
+            return False
 
     def config_root(self) -> Path:
         if self._config_dir is not None:

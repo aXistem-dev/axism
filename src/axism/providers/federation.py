@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from axism.discover import ProjectInfo, SessionMeta
 from axism.live import LiveSession
 from axism.providers.base import SessionProvider
-from axism.settings import DEFAULT_PROVIDER, Settings, load_settings
+from axism.settings import DEFAULT_PROVIDER, Settings, load_settings, save_settings
 
 
 def tag_provider(projects: list[ProjectInfo], provider_name: str) -> list[ProjectInfo]:
@@ -41,6 +43,64 @@ def enabled_providers_from_settings(
         prefs = s.provider_prefs(DEFAULT_PROVIDER)
         out.append(get_provider(DEFAULT_PROVIDER, config_dir=prefs.config_dir))
     return out
+
+
+@dataclass
+class DetectionResult:
+    """Outcome of detecting backends that had no recorded choice."""
+
+    found: list[str]
+    missing: list[str]
+    changed: bool
+
+    def message(self) -> str:
+        from axism.providers import PROVIDER_LABELS
+
+        def labels(ids: list[str]) -> str:
+            return ", ".join(PROVIDER_LABELS.get(i, i) for i in ids)
+
+        text = f"Found {labels(self.found)}" if self.found else "No agents found"
+        if self.missing:
+            text += f"; {labels(self.missing)} not detected"
+        return text + " \u2014 change in Settings (,)"
+
+
+def detect_undecided_providers(
+    settings: Settings | None = None, *, save: bool = True
+) -> DetectionResult:
+    """Switch backends with no recorded choice on or off by detecting them.
+
+    Recorded choices are never modified. Falls back to Claude Code when
+    nothing ends up enabled. Saves only when something changed.
+    """
+    from axism.providers import get_provider, list_provider_ids
+
+    s = settings if settings is not None else load_settings()
+    recorded = s.recorded_providers()
+    undecided = [pid for pid in list_provider_ids() if pid not in recorded]
+    if not undecided:
+        return DetectionResult([], [], False)
+    found: list[str] = []
+    missing: list[str] = []
+    for pid in undecided:
+        prefs = s.provider_prefs(pid)
+        try:
+            detected = bool(get_provider(pid, config_dir=prefs.config_dir).detect())
+        except Exception:
+            detected = False
+        prefs.enabled = detected
+        (found if detected else missing).append(pid)
+    if not any(s.provider_prefs(pid).enabled for pid in list_provider_ids()):
+        if DEFAULT_PROVIDER in undecided:
+            s.provider_prefs(DEFAULT_PROVIDER).enabled = True
+            missing.remove(DEFAULT_PROVIDER)
+            found.append(DEFAULT_PROVIDER)
+            found.sort(key=list_provider_ids().index)
+    if save:
+        save_settings(s)
+    else:
+        s.mark_recorded(set(undecided))
+    return DetectionResult(found, missing, True)
 
 
 def federate_discover(providers: list[SessionProvider]) -> list[ProjectInfo]:

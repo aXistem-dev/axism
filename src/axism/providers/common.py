@@ -18,6 +18,34 @@ from axism.live import LiveSession
 from axism.paths import strictly_inside
 
 
+def dir_has_content(path: Path) -> bool:
+    """True when ``path`` is a directory with at least one entry. Never raises."""
+    try:
+        if not path.is_dir():
+            return False
+        return next(path.iterdir(), None) is not None
+    except OSError:
+        return False
+
+
+def file_exists(path: Path) -> bool:
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
+def binary_on_path(*names: str) -> bool:
+    """True when any of ``names`` resolves on PATH. Never raises."""
+    for name in names:
+        try:
+            if shutil.which(name):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def remove_path(path: Path) -> str:
     """Delete a file or directory tree, returning a log line."""
     if path.is_symlink() or path.is_file():

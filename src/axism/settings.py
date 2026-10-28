@@ -70,10 +70,19 @@ class Settings:
 
     active_provider: str = DEFAULT_PROVIDER
     providers: dict[str, ProviderPrefs] = field(default_factory=dict)
+    # Provider ids present in the loaded settings.json (not the in-memory default).
+    _recorded: set[str] = field(default_factory=set, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if DEFAULT_PROVIDER not in self.providers:
             self.providers[DEFAULT_PROVIDER] = ProviderPrefs()
+
+    def recorded_providers(self) -> set[str]:
+        """Provider ids the user's settings file records (empty without a file)."""
+        return set(self._recorded)
+
+    def mark_recorded(self, names: set[str] | list[str]) -> None:
+        self._recorded |= set(names)
 
     def provider_prefs(self, name: str | None = None) -> ProviderPrefs:
         key = name or self.active_provider
@@ -100,7 +109,11 @@ class Settings:
             for name, pdata in raw_providers.items():
                 if isinstance(name, str) and name.strip():
                     providers[name.strip()] = ProviderPrefs.from_dict(pdata)
-        return cls(active_provider=active.strip(), providers=providers)
+        return cls(
+            active_provider=active.strip(),
+            providers=providers,
+            _recorded=set(providers),
+        )
 
 
 def default_settings() -> Settings:
@@ -128,6 +141,7 @@ def save_settings(settings: Settings, path: Path | None = None) -> Path:
     """Write settings atomically. Returns the path written."""
     target = path or settings_path()
     target.parent.mkdir(parents=True, exist_ok=True)
+    settings.mark_recorded(set(settings.providers))
     payload = json.dumps(settings.to_dict(), indent=2, sort_keys=True) + "\n"
     tmp = target.with_suffix(target.suffix + ".tmp")
     tmp.write_text(payload, encoding="utf-8")

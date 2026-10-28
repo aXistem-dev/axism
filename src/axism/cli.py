@@ -15,6 +15,7 @@ from axism.providers import (
     PROVIDER_LABELS,
     SessionProvider,
     UnsupportedOperation,
+    detect_undecided_providers,
     enabled_providers_from_settings,
     federate_discover,
     federate_merge_live,
@@ -775,6 +776,10 @@ def main(argv: list[str] | None = None) -> None:
         )
         if name == "claude_code":
             os.environ["CLAUDE_CONFIG_DIR"] = resolved
+    if args.command:
+        detection = detect_undecided_providers()
+        if detection.changed:
+            print(detection.message(), file=sys.stderr)
     try:
         rc = args.func(args)
     except UnsupportedOperation as exc:
