@@ -551,6 +551,36 @@ def test_enter_in_details_without_a_session_explains(tmp_path, monkeypatch):
     _run(main())
 
 
+@pytest.mark.parametrize("size", SIZES)
+def test_enter_on_the_marked_list_asks_to_clear_marks(tmp_path, monkeypatch, size):
+    _setup_claude(tmp_path, monkeypatch)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=size) as pilot:
+            await _focus_sessions(app, pilot)
+            await pilot.press("a")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app._focus_pane() == "detail"
+            assert "2 sessions selected" in _detail_text(app)
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not isinstance(app.screen, ReaderScreen)
+            assert "Clear marks to read a single session" in str(
+                app.query_one("#toast").render()
+            )
+            # With the marks cleared the pane shows one session, and Enter reads it.
+            await pilot.press("c")
+            await _settle(app, pilot)
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, ReaderScreen)
+
+    _run(main())
+
+
 def test_claude_details_created_from_first_record(tmp_path):
     path = tmp_path / f"{SID_A}.jsonl"
     write_jsonl(path, _conversation(SID_A, "t", [("q", "a")]))

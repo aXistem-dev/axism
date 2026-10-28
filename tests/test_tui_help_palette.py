@@ -338,3 +338,10 @@ def test_palette_lists_footer_actions_first(tmp_path, monkeypatch):
             await pilot.press("escape")
 
     _run(main())
+
+
+def test_help_note_says_what_esc_does_in_text_fields():
+    text = " ".join(help_text().split())
+    assert "Esc leaves it" not in text
+    assert "In the sessions filter, Esc clears the filter and leaves it" in text
+    assert "Esc cancels the dialog" in text

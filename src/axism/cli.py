@@ -590,9 +590,10 @@ def cmd_providers(args: argparse.Namespace) -> int:
     refused = _change_providers(args, settings)
     if refused is not None:
         return refused
+    default = default_provider_id(settings)
     for pid, label in PROVIDER_LABELS.items():
         prefs = settings.provider_prefs(pid)
-        marker = "*" if pid == settings.active_provider else " "
+        marker = "*" if pid == default else " "
         note = ""
         try:
             provider = get_provider(pid, config_dir=prefs.config_dir)

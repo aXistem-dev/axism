@@ -1097,6 +1097,8 @@ class SessionManagerApp(App[None]):
             if pane == "sessions" and "detail" not in self._pane_order():
                 return False, "Details are hidden at this width"
             if pane == "detail" and self._reader_session() is None:
+                if self.query_one("#detail", DetailPane).subject == "sessions:marked":
+                    return False, "Clear marks to read a single session"
                 return False, "Select a session first"
         elif action_id == "back":
             if not (in_filter or pane == "detail"):
@@ -1190,8 +1192,9 @@ class SessionManagerApp(App[None]):
             self._open_reader()
 
     def _reader_session(self) -> SessionMeta | None:
-        """The session the reader opens: the one the details pane shows."""
-        return self._detail_session or self.selected_session
+        """The session the reader opens: the one the details pane shows (none
+        while it shows the marked list or no session)."""
+        return self._detail_session
 
     def _open_reader(self) -> None:
         session = self._reader_session()

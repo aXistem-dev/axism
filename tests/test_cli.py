@@ -229,6 +229,17 @@ def test_providers_plain_listing_explains_the_marker(
     assert sum(ln.startswith("* = ") for ln in out.splitlines()) == 1
 
 
+def test_providers_marks_the_effective_default_when_the_stored_one_is_off(
+    _isolated_settings: Path, fake_root: Path, capsys
+):
+    # Stored default Hermes is switched off: Claude Code is the CLI default.
+    _write_choice(_isolated_settings, "hermes", ALL_OFF_BUT_CLAUDE)
+    assert _run(["providers"]) == 0
+    out = capsys.readouterr().out
+    assert _line(out, "claude_code").startswith("*")
+    assert not _line(out, "hermes").startswith("*")
+
+
 def test_providers_refusals(_isolated_settings: Path, fake_root: Path, capsys):
     path = _write_choice(_isolated_settings, "claude_code", ALL_OFF_BUT_CLAUDE)
     before = path.read_bytes()

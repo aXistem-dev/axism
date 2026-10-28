@@ -34,8 +34,14 @@ HELP_NOTES = (
     ),
     "Uppercase letters do the same as lowercase, except G (last row) and T (next theme).",
     (
-        "In a text field, typed keys go into the text; Esc leaves it, Tab moves "
-        "on and Ctrl+P opens the command palette."
+        "In a text field, typed keys go into the text. In the sessions filter, "
+        "Esc clears the filter and leaves it, Tab moves to the next pane and "
+        "Ctrl+P opens the command palette."
+    ),
+    (
+        "In the Settings, rename and move dialogs, Esc cancels the dialog and "
+        "Enter saves or applies; in Settings and move, Shift+Tab goes back to "
+        "the list."
     ),
 )
 
