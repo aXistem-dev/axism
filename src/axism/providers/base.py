@@ -58,6 +58,10 @@ class SessionProvider(Protocol):
         """Whether this agent appears to be installed or used on this machine."""
         ...
 
+    def status_note(self) -> str:
+        """Short health note shown by ``axism providers`` (empty when none)."""
+        ...
+
     def discover(self, root: Path | None = None) -> list[ProjectInfo]:
         ...
 
@@ -187,6 +191,9 @@ class ProviderBase:
 
     def detect(self) -> bool:
         return False
+
+    def status_note(self) -> str:
+        return ""
 
     def _unsupported(self, operation: str) -> UnsupportedOperation:
         return UnsupportedOperation(f"{self.label} does not support {operation}")

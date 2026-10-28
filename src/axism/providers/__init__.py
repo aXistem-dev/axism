@@ -29,6 +29,7 @@ PROVIDER_LABELS: dict[str, str] = {
     "claude_code": "Claude Code",
     "cursor": "Cursor",
     "hermes": "Hermes",
+    "opencode": "OpenCode",
 }
 
 __all__ = [
@@ -84,6 +85,10 @@ def get_provider(
         from axism.providers.hermes import HermesProvider
 
         return HermesProvider(config_dir=config_dir)
+    if name == "opencode":
+        from axism.providers.opencode import OpenCodeProvider
+
+        return OpenCodeProvider(config_dir=config_dir)
     raise KeyError(f"unknown provider: {name!r}")
 
 

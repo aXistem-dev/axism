@@ -181,3 +181,10 @@ def _no_real_agent_binary(monkeypatch: pytest.MonkeyPatch) -> None:
 def _isolated_axism_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Detection writes settings; never let a test reach the real config dir."""
     monkeypatch.setenv("AXISM_CONFIG_DIR", str(tmp_path / "axism-config-default"))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_opencode_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test may read the machine's real OpenCode data or state folder."""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data-default"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg-state-default"))

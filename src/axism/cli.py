@@ -510,12 +510,16 @@ def cmd_providers(args: argparse.Namespace) -> int:
     for pid, label in PROVIDER_LABELS.items():
         prefs = settings.provider_prefs(pid)
         marker = "*" if pid == settings.active_provider else " "
+        note = ""
         try:
-            root = str(get_provider(pid, config_dir=prefs.config_dir).config_root())
+            provider = get_provider(pid, config_dir=prefs.config_dir)
+            root = str(provider.config_root())
+            note = provider.status_note()
         except (OSError, KeyError, UnsupportedOperation) as exc:
             root = f"<unavailable: {exc}>"
         state = "enabled" if prefs.enabled else "disabled"
-        print(f"{marker} {pid:<12} {label:<14} {state:<9} {root}")
+        line = f"{marker} {pid:<12} {label:<14} {state:<9} {root}"
+        print(f"{line}  ({note})" if note else line)
     return 0
 
 

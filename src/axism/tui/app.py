@@ -193,6 +193,7 @@ def _agent_glyph(provider: str | None) -> str:
         "claude_code": "A",
         "cursor": "C",
         "hermes": "H",
+        "opencode": "O",
     }.get(provider or "", "?")
 
 

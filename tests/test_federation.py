@@ -50,6 +50,7 @@ def test_enabled_providers_respects_settings(tmp_path: Path):
             "claude_code": ProviderPrefs(enabled=False),
             "cursor": ProviderPrefs(enabled=True, config_dir=str(cursor_home)),
             "hermes": ProviderPrefs(enabled=True, config_dir=str(hermes_home)),
+            "opencode": ProviderPrefs(enabled=False),
         },
     )
     providers = enabled_providers_from_settings(settings)
@@ -129,6 +130,7 @@ def test_fallback_when_all_disabled():
             "claude_code": ProviderPrefs(enabled=False),
             "cursor": ProviderPrefs(enabled=False),
             "hermes": ProviderPrefs(enabled=False),
+            "opencode": ProviderPrefs(enabled=False),
         },
     )
     providers = enabled_providers_from_settings(settings)

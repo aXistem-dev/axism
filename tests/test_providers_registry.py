@@ -22,7 +22,7 @@ from axism.settings import ProviderPrefs, Settings
 
 
 def test_every_registered_id_builds_a_provider():
-    assert set(list_provider_ids()) == {"claude_code", "cursor", "hermes"}
+    assert set(list_provider_ids()) == {"claude_code", "cursor", "hermes", "opencode"}
     for pid in PROVIDER_LABELS:
         provider = get_provider(pid)
         assert provider.name == pid

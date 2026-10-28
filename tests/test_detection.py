@@ -62,14 +62,21 @@ def test_first_launch_enables_only_detected_and_saves(env) -> None:
     result = detect_undecided_providers()
     assert result.changed
     assert result.found == ["claude_code", "hermes"]
-    assert result.missing == ["cursor"]
+    assert result.missing == ["cursor", "opencode"]
     assert settings_path().is_file()
     assert _enabled(load_settings()) == {"claude_code", "hermes"}
-    assert load_settings().recorded_providers() >= {"claude_code", "cursor", "hermes"}
+    assert load_settings().recorded_providers() >= {
+        "claude_code",
+        "cursor",
+        "hermes",
+        "opencode",
+    }
 
 
 def test_existing_choice_never_overridden(env) -> None:
-    _write_settings({"claude_code": True, "cursor": False, "hermes": False})
+    _write_settings(
+        {"claude_code": True, "cursor": False, "hermes": False, "opencode": False}
+    )
     (env["cursor"] / "chats" / "abc").mkdir(parents=True)
     result = detect_undecided_providers()
     assert not result.changed
