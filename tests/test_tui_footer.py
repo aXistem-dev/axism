@@ -243,7 +243,7 @@ def test_every_registry_action_is_guarded():
     for action in keys.REGISTRY:
         method = getattr(SessionManagerApp, f"action_{action.id}")
         source = inspect.getsource(method)
-        assert f'self._guard("{action.id}")' in source, action.id
+        assert f'self._guard("{action.id}"' in source, action.id
 
 
 def test_modal_and_input_rules_still_hold(tmp_path, monkeypatch):
@@ -322,5 +322,33 @@ def test_stop_still_opens_its_confirm_when_a_session_is_running(tmp_path, monkey
             # Cancel: never stop anything in a test.
             await pilot.press("escape")
             await pilot.pause()
+
+    _run(main())
+
+
+@pytest.mark.parametrize("size", SIZES)
+def test_esc_with_nothing_to_back_out_of_is_silent(tmp_path, monkeypatch, size):
+    _setup(tmp_path, monkeypatch)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=size) as pilot:
+            for pane in ("#projects", "#sessions"):
+                await _focus(app, pilot, pane)
+                app._hide_toast()
+                await pilot.press("escape")
+                await pilot.pause()
+                assert str(app.query_one("#toast").render()).strip() == "", pane
+                assert app.focused is app.query_one(pane)
+            # Esc still backs out of the filter and the details pane.
+            await _focus(app, pilot, "#sessions-filter")
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app.focused is app.query_one("#sessions")
+            if app.query_one("#detail").display:
+                await _focus(app, pilot, "#detail")
+                await pilot.press("escape")
+                await pilot.pause()
+                assert app.focused is app.query_one("#sessions")
 
     _run(main())

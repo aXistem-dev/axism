@@ -1746,10 +1746,14 @@ class SessionManagerApp(App[None]):
                 return False, "Esc goes back from the details pane or the filter"
         return True, ""
 
-    def _guard(self, action_id: str) -> bool:
-        """True when ``action_id`` may run; otherwise show the reason and say False."""
+    def _guard(self, action_id: str, *, quiet: bool = False) -> bool:
+        """True when ``action_id`` may run; otherwise show the reason and say False.
+
+        ``quiet`` skips the message, for keys such as Esc that are pressed
+        out of habit where there is nothing to back out of.
+        """
         enabled, reason = self.action_available(action_id)
-        if not enabled:
+        if not enabled and not quiet:
             self._show_toast(reason, success=False, seconds=2.5)
         return enabled
 
@@ -1828,7 +1832,7 @@ class SessionManagerApp(App[None]):
 
     def action_back(self) -> None:
         """Esc: details → sessions list; filter → clear it and leave."""
-        if not self._guard("back"):
+        if not self._guard("back", quiet=True):
             return
         focused = self.focused
         if isinstance(focused, Input) and focused.id == "sessions-filter":
