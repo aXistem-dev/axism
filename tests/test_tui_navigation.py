@@ -228,8 +228,31 @@ def test_details_pane_scrolls_with_navigation_keys(tmp_path, monkeypatch):
             await pilot.press("enter")
             detail = app.query_one("#detail")
             assert app.focused is detail
+            detail.update("\n".join(f"line {i}" for i in range(80)))
+            await pilot.pause()
+            assert detail.max_scroll_y > 0
+            assert detail.size.height < 24
             row_before = app.query_one("#sessions", DataTable).cursor_row
-            await pilot.press("j", "G", "g", "ctrl+d", "pagedown")
+            assert detail.scroll_y == 0
+            await pilot.press("j")
+            await pilot.pause()
+            assert detail.scroll_y > 0
+            await pilot.press("G")
+            await pilot.pause()
+            assert detail.scroll_y == detail.max_scroll_y
+            await pilot.press("g")
+            await pilot.pause()
+            assert detail.scroll_y == 0
+            await pilot.press("ctrl+d")
+            await pilot.pause()
+            half = detail.scroll_y
+            assert half > 1
+            await pilot.press("ctrl+u")
+            await pilot.pause()
+            assert detail.scroll_y == 0
+            await pilot.press("pagedown")
+            await pilot.pause()
+            assert detail.scroll_y > half
             # Keys in the details pane scroll it; they never move the list.
             assert app.query_one("#sessions", DataTable).cursor_row == row_before
             assert app.focused is detail

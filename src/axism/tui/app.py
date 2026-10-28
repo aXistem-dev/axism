@@ -1155,8 +1155,20 @@ class AgentPickerScreen(ModalScreen[str | None]):
             self.dismiss(str(event.option.id))
 
 
-class DetailPane(Static, can_focus=True):
-    """Right pane: facts about the highlighted project or session; focusable."""
+class DetailPane(VerticalScroll):
+    """Right pane: a focusable scroll view around the details text."""
+
+    def __init__(self, content: str = "", *, id: str | None = None) -> None:
+        super().__init__(id=id)
+        self._body = Static(content, id="detail-body")
+
+    def compose(self) -> ComposeResult:
+        yield self._body
+
+    def update(self, content: str) -> None:
+        """Replace the details text and show it from the top."""
+        self._body.update(content)
+        self.scroll_home(animate=False)
 
 
 class SessionManagerApp(App[None]):
@@ -1231,8 +1243,12 @@ class SessionManagerApp(App[None]):
     #detail {
         width: 2fr;
         min-width: 20;
+        height: 1fr;
         padding: 0 1;
-        overflow-y: auto;
+    }
+    #detail-body {
+        width: 100%;
+        height: auto;
     }
     /* Below 70 columns: drop the detail pane so projects + sessions both fit. */
     .-narrow #detail {
@@ -1534,7 +1550,7 @@ class SessionManagerApp(App[None]):
         sess_table.show_horizontal_scrollbar = False
         sess_pane = self.query_one("#sessions-pane", Vertical)
         sess_pane.border_title = "Sessions"
-        detail = self.query_one("#detail", Static)
+        detail = self.query_one("#detail", DetailPane)
         detail.border_title = "Detail"
         self.theme_changed_signal.subscribe(self, self._on_theme_changed)
         self._sync_pane_focus_classes()
@@ -2076,7 +2092,7 @@ class SessionManagerApp(App[None]):
 
     def _show_project_detail(self) -> None:
         """Detail pane content when the projects list is focused."""
-        detail = self.query_one("#detail", Static)
+        detail = self.query_one("#detail", DetailPane)
         if self.selected_project_slugs and len(self.selected_project_slugs) > 1:
             targets = [p for p in self.projects if p.key in self.selected_project_slugs]
             if not targets:
@@ -2188,7 +2204,7 @@ class SessionManagerApp(App[None]):
             self.query_one("#sessions", DataTable).clear()
             self._update_sessions_meta()
             roots = roots_summary(self.providers) or str(self.root)
-            self.query_one("#detail", Static).update(
+            self.query_one("#detail", DetailPane).update(
                 "[b]No projects found[/b]\n\n"
                 f"Config root(s): {roots}\n"
                 "Press r to refresh · , settings · ? for help"
@@ -2275,7 +2291,7 @@ class SessionManagerApp(App[None]):
             self._show_project_detail()
             return
 
-        detail = self.query_one("#detail", Static)
+        detail = self.query_one("#detail", DetailPane)
         # Prefer explicit marks for multi-select view; else focused session.
         if self.selected_session_ids:
             targets = self._sessions_by_ids(self.selected_session_ids)

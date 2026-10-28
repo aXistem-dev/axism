@@ -211,7 +211,7 @@ def test_empty_project_list_clears_selection(tmp_path, monkeypatch):
             assert app.projects == []
             assert app.selected_session is None
             assert app.selected_project is None
-            detail = str(app.query_one("#detail").render())
+            detail = str(app.query_one("#detail-body").render())
             assert "Demo session" not in detail
             app.query_one("#sessions").focus()
             await pilot.pause()
