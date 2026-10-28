@@ -7,26 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-10-28
+
+Polish and fixes: unreadable folders and settings are handled without crashing, rename, delete, move and copy messages read cleanly, and the footer, dialogs, help, Settings and details pane are tidied.
+
 ### Fixed
 
 - An unreadable OpenCode data folder no longer fails with a permission error; `axism providers` reports it as `data folder unreadable` instead of an unsupported database layout
 - Saving Settings with a folder that cannot be read (or that sits under a folder that cannot be read) no longer closes the app; the save check lists it as unreadable, next to folders that do not exist
 - A Claude Code, Cursor or Hermes folder that cannot be read no longer stops `axism list` or the app from starting: that agent's sessions are skipped with a note (`Hermes: folder unreadable — skipped`), on stderr or in the app
+- A settings.json whose `providers` (or one agent's entry) is not an object counts as unreadable and is left untouched; the refusal ends with "fix or remove it, then restart aXism"
+- Rename messages show the new title in plain quotes (no doubled backslash)
+- `resume --print-only` prints a command that pastes correctly even with spaces in paths
+- A refused OpenCode move prints its refusal once; a failed OpenCode delete no longer repeats the `error:` prefix
+- A failed copy into OpenCode prints a leftover session as `imported_session_id (not listed)`; an OpenCode import refuses a relative destination folder
+- OpenCode sub-agents are folded recursively: a session's size and sub-agent count include grandchildren
+- The delete preview for database-backed agents (OpenCode, Hermes) shows the session's stored size instead of `Bytes: 0` (in the app in the same units as other sizes), saying that only the session's rows are removed through the agent and the database file stays
+- `r` retries session details that failed to load
+- Enabling an agent (in Settings or with `providers --enable`) never moves the CLI default; only `*` / `--default` does
+- Any Hermes message content that is JSON but not structured message parts, such as a prompt that happens to be JSON, is shown as typed
 
 ### Changed
 
-- Rename messages show the new title in plain quotes (no doubled backslash); `resume --print-only` prints a command that pastes correctly even with spaces in paths
-- OpenCode sub-agents are folded recursively: a session's size and sub-agent count include grandchildren
-- The delete preview for database-backed agents (OpenCode, Hermes) shows the session's stored size instead of `Bytes: 0` (in the app in the same units as other sizes), saying that only the session's rows are removed through the agent and the database file stays
-- A refused OpenCode move prints its refusal once; a failed OpenCode delete no longer repeats the `error:` prefix
-- A failed copy into OpenCode prints a leftover session as `imported_session_id (not listed)`; an OpenCode import refuses a relative destination folder
-- The reader and the details of a Hermes session show the text of structured message parts (a list of typed parts with text, or a single text part); any other JSON content, such as a prompt that happens to be JSON, is shown as typed
-- Enabling an agent (in Settings or with `providers --enable`) never moves the CLI default; only `*` / `--default` does
+- The reader and the details of a Hermes session show the text of structured message parts (a list of typed parts with text, or a single text part)
 - Saving a folder that does not exist asks in a warning-toned dialog (`y Save anyway · n Cancel`) instead of the red delete style
 - Settings works out each agent's status in the background (`checking…` first), so it opens at once with a large session store; the statuses read `found · N sessions`, `folder missing`, `folder unreadable` or `no sessions · command not on PATH`
 - Settings notes the run's `--provider` / `--config-dir` overrides (`This run: only …`, `… folder: … (this run, not saved)`), and a typed folder is stored as an absolute path
-- A settings.json whose `providers` (or one agent's entry) is not an object counts as unreadable and is left untouched; the refusal ends with "fix or remove it, then restart aXism"
-- `r` retries session details that failed to load; the project details use the same facts style as sessions (name, agent, folder, sessions, running, size, last update), and the turns line reads `4 messages (2 prompts)`
+- The project details use the same facts style as sessions (name, agent, folder, sessions, running, size, last update), and the turns line reads `4 messages (2 prompts)`
 - The storage line says `stored in the agent's database` per session (Cursor CLI chats), not per agent
 - The reader loads the conversation in the background behind a Loading line, and Esc works meanwhile
 - The footer takes its colours from the theme, so light themes get a light footer
