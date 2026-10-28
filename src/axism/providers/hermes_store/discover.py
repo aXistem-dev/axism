@@ -188,13 +188,22 @@ def _text_parts(value: object) -> list[str]:
     return []
 
 
+def _looks_like_parts(data: object) -> bool:
+    """Message parts: a list of dicts with a ``type``, or a dict with ``type``/``text``/``content``."""
+    if isinstance(data, list):
+        return bool(data) and all(isinstance(i, dict) and "type" in i for i in data)
+    return isinstance(data, dict) and any(k in data for k in ("type", "text", "content"))
+
+
 def _structured_text(content: str) -> str:
     """Plain text, or the text parts of JSON content (empty when it has none)."""
     if content.lstrip()[:1] not in ("{", "["):
         return content
     try:
         data = json.loads(content)
-    except ValueError:
+    except (ValueError, RecursionError):
+        return content
+    if not _looks_like_parts(data):
         return content
     return "\n".join(_text_parts(data)).strip()
 

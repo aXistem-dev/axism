@@ -494,3 +494,27 @@ def test_transcript_extracts_text_from_structured_content(
         ("assistant", "structured answer"),
         ("user", "[draft] not json"),
     ]
+
+
+def test_transcript_keeps_plain_prompts_that_happen_to_be_json(
+    hermes_env: tuple[Path, str]
+):
+    from axism.providers.hermes_store import discover as hermes_discover
+
+    root, _ = hermes_env
+    prompts = [
+        '{"name": "x", "n": 1}',
+        "[1, 2, 3]",
+        '["foo", "bar"]',
+        "[" * 5000,
+    ]
+    con = sqlite3.connect(state_db(root))
+    with con:
+        con.executemany(
+            "INSERT INTO messages (session_id, role, content, timestamp)"
+            " VALUES (?, 'user', ?, 600.0)",
+            [(WEBUI_SESSION, c) for c in prompts],
+        )
+    con.close()
+    turns = hermes_discover.transcript_turns(root, WEBUI_SESSION)
+    assert turns == [("user", "web prompt")] + [("user", c) for c in prompts]
