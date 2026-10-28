@@ -156,8 +156,7 @@ def test_odd_title_and_folders_show_verbatim_in_lists_and_details(
             # Project details (projects pane focused).
             await _highlight_project(app, pilot, ODD_SLUG)
             detail = _shown(app, "#detail-body")
-            assert ODD_FOLDER in detail
-            assert ODD_SLUG in detail
+            assert ODD_FOLDER.replace("/home/alice", "~", 1) in detail
             # Sessions table: the title, cut to the column, as written.
             sessions = await _focus_sessions_of(app, pilot, ODD_SLUG)
             shown = _cell_text(sessions.get_cell(app.selected_session.key, "Title"))

@@ -7,6 +7,7 @@ turns only. The screen scrolls with the registry movement keys (scope
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING
 
 from textual.app import ComposeResult
@@ -96,9 +97,28 @@ class ReaderScreen(ScrollKeys, Screen[None]):
         title = _one_line(self.session.display_title)
         yield Static(f"{title} · {self.agent}", id="reader-header", markup=False)
         yield VerticalScroll(
-            Static(self._body(), id="reader-body"), id="reader-scroll", can_focus=True
+            Static(
+                Content.styled("Loading…", "$text-muted"), id="reader-body"
+            ),
+            id="reader-scroll",
+            can_focus=True,
         )
         yield ContextFooter(self.SCOPE)
+
+    def on_mount(self) -> None:
+        self.run_worker(self._load, thread=True, group="reader", exit_on_error=False)
+
+    def _load(self) -> None:
+        """Worker thread: build the conversation, then show it."""
+        body = self._body()
+        with contextlib.suppress(Exception):  # the screen may already be closed
+            self.app.call_from_thread(self._show, body)
+
+    def _show(self, body: Content) -> None:
+        if not self.is_attached:
+            return
+        with contextlib.suppress(Exception):
+            self.query_one("#reader-body", Static).update(body)
 
     def _body(self) -> Content:
         """The conversation, or one line saying why it cannot be shown."""

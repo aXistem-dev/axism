@@ -183,6 +183,10 @@ class SessionProvider(Protocol):
         """Facts, first/last prompt and last reply; never raises."""
         ...
 
+    def stored_in_database(self, session: SessionMeta) -> bool:
+        """Whether this session lives in the agent's database, not in a transcript file."""
+        ...
+
 
 _TOOL_RESULT_LINE = "[tool result]"
 _TOOL_USE_RE = re.compile(r"^\[ran tool: .*\]$")
@@ -362,6 +366,9 @@ class ProviderBase:
             raise TranscriptUnavailable(canonical.export_error)
         return text_turns(canonical.turns)
 
+    def stored_in_database(self, session: SessionMeta) -> bool:
+        return bool(self.stores_in_database)
+
     def session_details(self, session: SessionMeta) -> SessionDetails:
         details = SessionDetails()
         try:
@@ -370,6 +377,7 @@ class ProviderBase:
             details.note = exc.reason
             return details
         details.turns = len(turns)
+        details.prompts = sum(1 for t in turns if t.role == "user")
         users = [t.content for t in turns if t.role == "user"]
         replies = [t.content for t in turns if t.role == "assistant"]
         details.first_prompt = users[0] if users else None

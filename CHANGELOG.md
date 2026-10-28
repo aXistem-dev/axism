@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `r` retries session details that failed to load; the project details use the same facts style as sessions (name, agent, folder, sessions, running, size, last update), and the turns line reads `4 messages (2 prompts)`
+- The storage line says `stored in the agent's database` per session (Cursor CLI chats), not per agent
+- The reader loads the conversation in the background behind a Loading line, and Esc works meanwhile
 - The footer takes its colours from the theme, so light themes get a light footer
 - The reader and the help screen show their scroll keys (`j/k`, `g/G`, `PgDn/PgUp`) in the footer next to `Esc`; the help screen's footer replaces its hand-written hint line
 - The quit dialog's keys read `y Quit · n Stay · Esc Stay`

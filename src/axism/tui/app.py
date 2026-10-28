@@ -50,7 +50,7 @@ from axism.settings import (
     save_settings,
     settings_path,
 )
-from axism.tui.details_view import fmt_size, session_details_text
+from axism.tui.details_view import fmt_size, project_details_text, session_details_text
 from axism.tui.dialogs import (
     AgentPickerScreen,
     ConfirmDeleteScreen,
@@ -1476,6 +1476,9 @@ class SessionManagerApp(App[None]):
             return
         self.projects = federate_discover(self.providers)
         self.live = federate_merge_live(self.providers, use_cli=True)
+        # Failed loads retry; good ones stay cached.
+        for key in [k for k, d in self._details_cache.items() if d.note]:
+            del self._details_cache[key]
         known_sessions = {s.key for p in self.projects for s in p.sessions}
         self.selected_session_ids &= known_sessions
         known_slugs = {p.key for p in self.projects}
@@ -1587,30 +1590,31 @@ class SessionManagerApp(App[None]):
             )
             return
 
-        live_n = sum(
-            1
-            for s in p.sessions
-            if (lv := live_for_session(self.live, s)) is not None
-            and (lv.is_killable or lv.kind == "background")
+        running = 0
+        for s in p.sessions:
+            lv = live_for_session(self.live, s)
+            if lv is not None and (
+                lv.is_live
+                or lv.state == "running"
+                or self._provider_for_session(s).can_stop(lv)
+            ):
+                running += 1
+        folder = p.cwd_guess or p.slug
+        detail.update(
+            project_details_text(
+                name=Path(folder.rstrip("/")).name or folder,
+                folder=folder,
+                agent=self._agent_label(p.provider),
+                sessions=p.session_count,
+                running=running,
+                size_bytes=p.total_bytes,
+                updated=max((s.mtime for s in p.sessions), default=None),
+                now=datetime.now().astimezone(),
+                home=str(Path.home()),
+                hint="m/M Move · d/D Delete project · Tab/→ sessions",
+            ),
+            subject=f"project:{p.key}",
         )
-        marked = p.key in self.selected_project_slugs
-
-        def fact(label: str, value: str | Content) -> Content:
-            return Content.assemble((f"{label:<9}", MUTED), value)
-
-        lines = [
-            Content.styled(p.cwd_guess, HEADING),
-            fact("agent", Content.styled(self._agent_label(p.provider), SECONDARY)),
-            fact("slug", Content.styled(p.slug, SECONDARY)),
-            fact("path", Content.styled(str(p.path), MUTED)),
-            fact("sessions", str(p.session_count)),
-            fact("size", _fmt_size(p.total_bytes)),
-            fact("live/bg", str(live_n)),
-            fact("selected", Content.styled("yes", "$text-success") if marked else "no"),
-            Content(""),
-            Content.styled("m/M Move · d/D Delete project · Tab/→ sessions", MUTED),
-        ]
-        detail.update(_lines(lines), subject=f"project:{p.key}")
 
     def _reload_projects_table(self) -> None:
         table = self.query_one("#projects", DataTable)
@@ -1840,7 +1844,7 @@ class SessionManagerApp(App[None]):
             details,
             agent=self._agent_label(s.provider or provider.name),
             state=self._running_state(s),
-            database=bool(getattr(provider, "stores_in_database", False)),
+            database=provider.stored_in_database(s),
             now=datetime.now().astimezone(),
             home=str(Path.home()),
         )

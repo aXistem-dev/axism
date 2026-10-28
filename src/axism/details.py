@@ -18,7 +18,8 @@ class SessionDetails:
     """Facts about one session beyond :class:`SessionMeta` (all optional)."""
 
     created: float | None = None  # epoch seconds
-    turns: int | None = None
+    turns: int | None = None  # text turns (messages)
+    prompts: int | None = None  # of those, the user's
     model: str | None = None
     cost_usd: float | None = None
     tokens_in: int | None = None

@@ -148,6 +148,13 @@ def _count(value: object) -> str:
         return str(value)
 
 
+def _turns(details: SessionDetails) -> str:
+    text = _plural(int(details.turns or 0), "message")
+    if details.prompts is not None:
+        text += f" ({_plural(int(details.prompts), 'prompt')})"
+    return text
+
+
 def _fact(label: str, value: str) -> Content:
     return Content.assemble((f"{label:<{_LABEL_WIDTH}}", "$text-muted"), value)
 
@@ -193,7 +200,7 @@ def session_details_text(
         lines += [Content(""), Content.styled("Loading the conversation…", "$text-muted")]
         return _join(lines)
     if details.turns is not None and not details.note:
-        lines.append(_fact("turns", str(details.turns)))
+        lines.append(_fact("turns", _turns(details)))
     if details.model:
         lines.append(_fact("model", str(details.model)))
     if details.cost_usd is not None:
@@ -219,4 +226,33 @@ def session_details_text(
         Content(""),
         Content.styled("Enter reads the whole conversation", "$text-muted"),
     ]
+    return _join(lines)
+
+
+def project_details_text(
+    *,
+    name: str,
+    folder: str,
+    agent: str,
+    sessions: int,
+    running: int,
+    size_bytes: int,
+    updated: float | None,
+    now: datetime,
+    home: str,
+    hint: str = "",
+) -> Content:
+    """The details pane for one project, in the same facts style as a session."""
+    lines: list[Content] = [
+        Content.styled(name or "-", "bold $accent"),
+        _fact("agent", agent),
+        _fact("folder", tilde(folder, home) if folder else "-"),
+        _fact("sessions", str(sessions)),
+        _fact("running", str(running)),
+        _fact("size", fmt_size(size_bytes)),
+    ]
+    if updated:
+        lines.append(_fact("updated", readable_time(updated, now)))
+    if hint:
+        lines += [Content(""), Content.styled(hint, "$text-muted")]
     return _join(lines)

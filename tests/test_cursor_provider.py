@@ -497,3 +497,10 @@ def test_symlinked_project_dir_is_refused_and_target_survives(
     actions = provider.execute_project_delete(bare, dry_run=False, force=True)
     assert f"refused: {root / 'projects' / slug} is a symlink" in actions
     assert any(real.rglob("*.jsonl"))
+
+
+def test_storage_label_follows_the_session(cursor_env: tuple[Path, str]):
+    provider = CursorProvider()
+    sessions = {s.session_id: s for p in provider.discover() for s in p.sessions}
+    assert provider.stored_in_database(sessions[CLI_ONLY]) is True
+    assert provider.stored_in_database(sessions[AGENT_ONLY]) is False

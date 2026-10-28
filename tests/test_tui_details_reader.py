@@ -225,7 +225,7 @@ def test_details_shows_facts_and_last_turns(tmp_path, monkeypatch, size):
             assert "created" in text and "updated" in text
             assert " ago)" in text
             assert "· transcript" in text
-            assert re.search(r"turns\s+4\b", text)
+            assert re.search(r"turns\s+4 messages \(2 prompts\)", text)
             assert "model-x" in text
             assert "First prompt" in text and "first question" in text
             assert "Last prompt" in text and "second question" in text
@@ -670,3 +670,134 @@ def test_note_and_folder_are_verbatim(tmp_path, monkeypatch):
     _run(main())
     meta = _meta(cwd="/home/alice/src/[$x]/[B]y[/B]\\")
     assert "~/src/[$x]/[B]y[/B]\\" in _text(meta, SessionDetails())
+
+
+# ---- 0.2.1 follow-ups: retry, project view, turns, reader loading --------------
+
+
+def test_turns_label_counts_messages_and_prompts():
+    out = _text(_meta(), SessionDetails(turns=4, prompts=2))
+    assert "4 messages (2 prompts)" in out
+    out = _text(_meta(), SessionDetails(turns=1, prompts=1))
+    assert "1 message (1 prompt)" in out
+
+
+def test_provider_details_carry_prompt_count(tmp_path, monkeypatch):
+    claude = _setup_claude(tmp_path, monkeypatch)
+    prov = ClaudeCodeProvider(claude)
+    meta = next(s for p in prov.discover() for s in p.sessions if s.session_id == SID_A)
+    d = prov.session_details(meta)
+    assert (d.turns, d.prompts) == (4, 2)
+
+
+def test_refresh_retries_failed_details_only(tmp_path, monkeypatch):
+    _setup_claude(tmp_path, monkeypatch)
+    real = ClaudeCodeProvider.session_details
+    calls: list[str] = []
+    fail = {"on": True}
+
+    def flaky(self, s):
+        calls.append(s.session_id)
+        if fail["on"] and s.session_id == SID_A:
+            return SessionDetails(note="Cannot read conversation: busy")
+        return real(self, s)
+
+    monkeypatch.setattr(ClaudeCodeProvider, "session_details", flaky)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await _focus_sessions(app, pilot)
+            assert "Cannot read conversation: busy" in _detail_text(app)
+            await pilot.press("j")
+            await _settle(app, pilot)
+            await pilot.press("k")
+            await _settle(app, pilot)
+            assert calls.count(SID_A) == 1 and calls.count(SID_B) == 1
+            fail["on"] = False
+            await pilot.press("r")
+            await _settle(app, pilot)
+            assert calls.count(SID_A) == 2  # the failed one retried
+            assert calls.count(SID_B) == 1  # the good one stayed cached
+            assert "second answer" in _detail_text(app)
+
+    _run(main())
+
+
+def test_project_details_text_is_facts_style():
+    from axism.tui.details_view import project_details_text
+
+    out = project_details_text(
+        name="[b]demo[/b]", folder="/home/alice/src/[b]demo[/b]", agent="Claude Code",
+        sessions=3, running=1, size_bytes=2048,
+        updated=datetime(2026, 10, 28, 6, 0).astimezone().timestamp(),
+        now=datetime(2026, 10, 28, 7, 1).astimezone(), home="/home/alice",
+    ).plain
+    assert "[b]demo[/b]" in out and "~/src/[b]demo[/b]" in out
+    assert "/home/alice" not in out
+    assert "sessions" in out and "3" in out and "running" in out
+    assert "2.0KB" in out and "today 06:00" in out
+    assert "selected" not in out and "slug" not in out and "path" not in out
+
+
+@pytest.mark.parametrize("size", SIZES)
+def test_project_view_counts_service_only_running_sessions(tmp_path, monkeypatch, size):
+    from axism.live import LiveSession
+
+    _setup_claude(tmp_path, monkeypatch)
+    # A live record with no pid, state running (as OpenCode service sessions).
+    live = {SID_A: LiveSession(session_id=SID_A, pid=None, kind="interactive", state="running")}
+    monkeypatch.setattr(tui, "federate_merge_live", lambda provs, use_cli=True: live)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=size) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            app.query_one("#projects", DataTable).focus()
+            await _settle(app, pilot)
+            text = _detail_text(app)
+            assert "demo" in text and "~/src/demo" in text
+            assert re.search(r"sessions\s+2\b", text)
+            assert re.search(r"running\s+1\b", text)
+            assert "selected" not in text and "live/bg" not in text
+
+    _run(main())
+
+
+@pytest.mark.parametrize("size", SIZES)
+def test_reader_loads_in_background_and_esc_works_while_loading(tmp_path, monkeypatch, size):
+    import threading
+
+    _setup_claude(tmp_path, monkeypatch)
+    gate = threading.Event()
+    real = ClaudeCodeProvider.transcript
+
+    def slow(self, s):
+        gate.wait(10)
+        return real(self, s)
+
+    monkeypatch.setattr(ClaudeCodeProvider, "transcript", slow)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=size) as pilot:
+            await _focus_sessions(app, pilot)
+            await pilot.press("enter")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, ReaderScreen)
+            assert "Loading" in str(app.screen.query_one("#reader-body").render())
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not isinstance(app.screen, ReaderScreen)
+            gate.set()
+            await pilot.press("enter")
+            await pilot.pause(0.3)
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert isinstance(app.screen, ReaderScreen)
+            body = str(app.screen.query_one("#reader-body").render())
+            assert "first question" in body and "Loading" not in body
+
+    _run(main())

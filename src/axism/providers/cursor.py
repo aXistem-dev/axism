@@ -64,6 +64,10 @@ class CursorProvider(ProviderBase):
             Path(config_dir).expanduser() if config_dir is not None else None
         )
 
+    def stored_in_database(self, session: SessionMeta) -> bool:
+        # CLI chats keep their turns in store.db; agent transcripts are JSONL.
+        return session.transcript_path.suffix == ".db"
+
     def detect(self) -> bool:
         try:
             root = self.config_root()
