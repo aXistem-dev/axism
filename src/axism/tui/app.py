@@ -2483,7 +2483,12 @@ class SessionManagerApp(App[None]):
             details: list[str] = []
             last_fail = ""
             for s, live in targets:
-                ok, msg = self._provider_for_session(s).slash_stop(s.session_id, live)
+                try:
+                    ok, msg = self._provider_for_session(s).slash_stop(
+                        s.session_id, live
+                    )
+                except UnsupportedOperation as exc:
+                    ok, msg = False, f"refused: {exc}"
                 last = msg.splitlines()[-1] if msg else ""
                 details.append(f"{s.session_id[:8]}: {last}")
                 if ok:

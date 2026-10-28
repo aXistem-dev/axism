@@ -396,3 +396,94 @@ def test_keep_memory_toggle_does_not_rebuild_plans(tmp_path, monkeypatch):
             await pilot.pause()
 
     _run(main())
+
+
+# ---- OpenCode stop ----------------------------------------------------------
+
+OC_SESSION = "ses_a1AliceTuiStop01"
+
+
+def _setup_opencode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from axism.live import LiveSession
+    from axism.providers.opencode import OpenCodeProvider
+    from tests.opencode_fixtures import make_opencode_db
+
+    root = tmp_path / "oc" / "opencode"
+    make_opencode_db(
+        root,
+        sessions=[
+            {"id": OC_SESSION, "project_id": "p1", "parent_id": None,
+             "directory": "/home/alice/src/demo", "title": "demo",
+             "time_created": 1, "time_updated": 2},
+        ],
+        projects=[{"id": "p1", "worktree": "/home/alice/src/demo"}],
+        messages=[{"session_id": OC_SESSION, "type": "user", "seq": 1,
+                   "data": {"text": "hi"}}],
+    )
+    cfg = tmp_path / "axcfg-oc"
+    cfg.mkdir()
+    (cfg / "settings.json").write_text(
+        json.dumps(
+            {
+                "active_provider": "opencode",
+                "providers": {
+                    "claude_code": {"enabled": False, "config_dir": None},
+                    "cursor": {"enabled": False, "config_dir": None},
+                    "hermes": {"enabled": False, "config_dir": None},
+                    "opencode": {"enabled": True, "config_dir": str(root)},
+                },
+            }
+        )
+    )
+    monkeypatch.setenv("AXISM_CONFIG_DIR", str(cfg))
+    live = LiveSession(
+        session_id=OC_SESSION, kind="interactive", state="running",
+        pid=None, source="opencode-service",
+    )
+    monkeypatch.setattr(
+        OpenCodeProvider, "merge_live", lambda self, root=None, use_cli=True: {OC_SESSION: live}
+    )
+
+
+async def _stop_via_keys(app: SessionManagerApp) -> str:
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause()
+        app.query_one("#sessions").focus()
+        await pilot.pause()
+        await pilot.press("s")
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmDeleteScreen)
+        await pilot.press("y")
+        await pilot.pause()
+        await pilot.pause()
+        assert app.is_running and app.return_code is None
+        return str(app.query_one("#toast").render())
+
+
+def test_tui_stop_on_service_running_opencode_session(tmp_path, monkeypatch):
+    from axism.providers.opencode import OpenCodeProvider
+
+    _setup_opencode(tmp_path, monkeypatch)
+    calls: list = []
+    monkeypatch.setattr(
+        OpenCodeProvider,
+        "stop",
+        lambda self, sid, live=None: calls.append(sid) or (True, "interrupted"),
+    )
+    toast = _run(_stop_via_keys(SessionManagerApp()))
+    assert calls == [OC_SESSION]
+    assert "Stopped" in toast
+
+
+def test_tui_stop_unsupported_shows_failure_toast(tmp_path, monkeypatch):
+    from axism.providers.base import UnsupportedOperation
+    from axism.providers.opencode import OpenCodeProvider
+
+    _setup_opencode(tmp_path, monkeypatch)
+
+    def unsupported(self, sid, live=None):
+        raise UnsupportedOperation("OpenCode does not support this stop")
+
+    monkeypatch.setattr(OpenCodeProvider, "slash_stop", unsupported)
+    toast = _run(_stop_via_keys(SessionManagerApp()))
+    assert "Stop failed" in toast and "does not support" in toast

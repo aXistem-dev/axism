@@ -73,7 +73,7 @@ def test_registered_and_label_order():
 
 def test_capabilities():
     c = OpenCodeProvider.capabilities
-    assert not c.slash_stop and not c.fragments
+    assert c.slash_stop and not c.fragments
     assert not c.memory_merge and not c.purge_project
     assert c.resume and c.stop and c.rename
     assert c.move_sessions and c.move_projects
@@ -188,9 +188,31 @@ def test_stop_never_targets_service_pid(prov, monkeypatch):
     assert A not in prov.merge_live()
 
 
-def test_slash_stop_unsupported(prov):
-    with pytest.raises(UnsupportedOperation):
-        prov.slash_stop(A)
+def test_slash_stop_delegates_to_stop(prov, monkeypatch):
+    seen: list = []
+    live = LiveSession(A, "interactive", state="running")
+    monkeypatch.setattr(
+        prov, "stop", lambda sid, lv=None: seen.append((sid, lv)) or (True, "stopped")
+    )
+    assert prov.slash_stop(A, live) == (True, "stopped")
+    assert seen == [(A, live)]
+
+
+def test_cli_stop_uses_stop(prov, monkeypatch, capsys):
+    live = LiveSession(A, "interactive", state="running", source="opencode-service")
+    monkeypatch.setattr(OpenCodeProvider, "merge_live", lambda self, *a, **k: {A: live})
+    called: list = []
+    monkeypatch.setattr(
+        OpenCodeProvider,
+        "stop",
+        lambda self, sid, lv=None: called.append(sid) or (True, "stopped"),
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli.main(
+            ["stop", A, "--yes", "--provider", "opencode", "--config-dir", str(prov.config_root())]
+        )
+    assert exc.value.code == 0
+    assert called == [A]
 
 
 def test_open_argv_and_custom_root_env(prov, tmp_path, monkeypatch):

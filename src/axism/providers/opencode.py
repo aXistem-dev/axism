@@ -61,7 +61,7 @@ class OpenCodeProvider(ProviderBase):
     config_hint = "$XDG_DATA_HOME/opencode or ~/.local/share/opencode"
     capabilities = Capabilities(
         resume=True,
-        slash_stop=False,
+        slash_stop=True,
         stop=True,
         rename=True,
         move_sessions=True,
@@ -172,7 +172,8 @@ class OpenCodeProvider(ProviderBase):
     def slash_stop(
         self, session_id: str, live: LiveSession | None = None
     ) -> tuple[bool, str]:
-        raise self._unsupported("a soft stop")
+        """OpenCode has no softer stop than :meth:`stop`."""
+        return self.stop(session_id, live)
 
     def stop(
         self, session_id: str, live: LiveSession | None = None
