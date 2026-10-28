@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -90,11 +91,12 @@ class FragmentInventory:
     def deletable(self) -> list[Fragment]:
         return [f for f in self.fragments if not f.is_protected()]
 
-    def stored_rows_note(self) -> str | None:
+    def stored_rows_note(self, size_text: Callable[[int], str] | None = None) -> str | None:
         """For database-backed agents: where the session's size sits.
 
         The session's rows are removed through the agent; the protected
-        database file itself is never a removal target.
+        database file itself is never a removal target. ``size_text`` formats
+        the size (default: plain bytes, ``1234 B``).
         """
         rows = next(
             (f for f in self.fragments if f.kind == "session_rows" and f.is_protected()),
@@ -102,8 +104,9 @@ class FragmentInventory:
         )
         if rows is None:
             return None
+        size = size_text(rows.size_bytes) if size_text else f"{rows.size_bytes} B"
         return (
-            f"stored in the agent's database ({rows.size_bytes} B; "
+            f"stored in the agent's database ({size}; "
             "removed through the agent, the database file stays)"
         )
 

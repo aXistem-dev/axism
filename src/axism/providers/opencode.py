@@ -99,6 +99,8 @@ class OpenCodeProvider(ProviderBase):
         status = oc_discover.layout_status(root)
         if status == "missing":
             return "database not found"
+        if status == "unreadable":
+            return "data folder unreadable"
         if status == "unsupported":
             return _UNSUPPORTED_LAYOUT
         try:

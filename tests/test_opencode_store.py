@@ -276,7 +276,7 @@ def test_wal_database_with_an_open_writer_lists_sessions_and_adds_no_files(tmp_p
         writer.close()
 
 
-def test_unreadable_data_directory_degrades_to_unsupported(tmp_path):
+def test_unreadable_data_directory_is_reported_as_unreadable(tmp_path):
     import os
 
     root = tmp_path / "locked"
@@ -285,8 +285,37 @@ def test_unreadable_data_directory_degrades_to_unsupported(tmp_path):
     try:
         if os.access(root, os.R_OK | os.X_OK):
             pytest.skip("permissions are not enforced here (running as root)")
-        assert discover.layout_status(root) in {"unsupported", "missing"}
+        assert discover.layout_status(root) == "unreadable"
         assert discover.discover_all(root) == []
+    finally:
+        root.chmod(0o700)
+
+
+def test_data_directory_behind_an_unreadable_parent_is_unreadable(tmp_path):
+    import os
+
+    parent = tmp_path / "gate"
+    root = parent / "opencode"
+    _base(root)
+    parent.chmod(0)
+    try:
+        if os.access(parent, os.R_OK | os.X_OK):
+            pytest.skip("permissions are not enforced here (running as root)")
+        assert discover.layout_status(root) == "unreadable"
+    finally:
+        parent.chmod(0o700)
+
+
+def test_unreadable_empty_data_directory_is_not_called_missing(tmp_path):
+    import os
+
+    root = tmp_path / "opencode"
+    root.mkdir()
+    root.chmod(0)
+    try:
+        if os.access(root, os.R_OK | os.X_OK):
+            pytest.skip("permissions are not enforced here (running as root)")
+        assert discover.layout_status(root) == "unreadable"
     finally:
         root.chmod(0o700)
 

@@ -497,7 +497,7 @@ def _format_session_delete_confirm(
             live_bit = f"  ·  live {live.kind}/{live.state}"
             if live.pid is not None:
                 live_bit += f" pid={live.pid}"
-        stored = plan.inventory.stored_rows_note()
+        stored = plan.inventory.stored_rows_note(_fmt_size)
         size_bit = (
             stored
             if stored is not None and not nfrag

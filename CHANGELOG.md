@@ -9,15 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- An unreadable OpenCode data folder is reported as unsupported instead of failing with a permission error
+- An unreadable OpenCode data folder no longer fails with a permission error; `axism providers` reports it as `data folder unreadable` instead of an unsupported database layout
 - Saving Settings with a folder that cannot be read (or that sits under a folder that cannot be read) no longer closes the app; the save check lists it as unreadable, next to folders that do not exist
-- An agent folder that cannot be read no longer stops `axism list` or the app from starting: that agent's sessions are skipped with a note (`Hermes: folder unreadable — skipped`), on stderr or in the app
+- A Claude Code, Cursor or Hermes folder that cannot be read no longer stops `axism list` or the app from starting: that agent's sessions are skipped with a note (`Hermes: folder unreadable — skipped`), on stderr or in the app
 
 ### Changed
 
 - Rename messages show the new title in plain quotes (no doubled backslash); `resume --print-only` prints a command that pastes correctly even with spaces in paths
 - OpenCode sub-agents are folded recursively: a session's size and sub-agent count include grandchildren
-- The delete preview for database-backed agents (OpenCode, Hermes) shows the session's stored size instead of `Bytes: 0`, saying that only the session's rows are removed through the agent and the database file stays
+- The delete preview for database-backed agents (OpenCode, Hermes) shows the session's stored size instead of `Bytes: 0` (in the app in the same units as other sizes), saying that only the session's rows are removed through the agent and the database file stays
 - A refused OpenCode move prints its refusal once; a failed OpenCode delete no longer repeats the `error:` prefix
 - A failed copy into OpenCode prints a leftover session as `imported_session_id (not listed)`; an OpenCode import refuses a relative destination folder
 - The reader and the details of a Hermes session show the text of structured message parts (a list of typed parts with text, or a single text part); any other JSON content, such as a prompt that happens to be JSON, is shown as typed

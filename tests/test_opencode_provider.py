@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -435,6 +436,26 @@ def test_status_note_variants(prov, tmp_path, monkeypatch):
     )
 
 
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0,
+                    reason="permissions do not apply to root")
+def test_status_note_for_an_unreadable_data_folder(tmp_path, capsys):
+    root = tmp_path / "opencode"
+    make_opencode_db(root, sessions=[], projects=[], messages=[])
+    save_settings(
+        Settings(providers={"opencode": ProviderPrefs(enabled=True, config_dir=str(root))})
+    )
+    root.chmod(0)
+    try:
+        assert OpenCodeProvider(config_dir=root).status_note() == "data folder unreadable"
+        with pytest.raises(SystemExit):
+            cli.main(["providers"])
+    finally:
+        root.chmod(0o700)
+    out = capsys.readouterr().out
+    assert "data folder unreadable" in out, out
+    assert "unsupported" not in out
+
+
 def test_detect(prov, tmp_path, monkeypatch):
     assert prov.detect()
     empty = OpenCodeProvider(config_dir=tmp_path / "empty")
@@ -708,11 +729,28 @@ def test_delete_preview_shows_stored_size_and_keeps_the_file(prov, monkeypatch, 
     assert "the database file stays" in text
 
     from axism.tui.app import _format_session_delete_confirm
+    from axism.tui.details_view import fmt_size
 
     sess = prov.find_session(A)[1]
     body, _ = _format_session_delete_confirm([sess], [plan], [], prov)
     assert "the database file stays" in str(body)
-    assert f"{stored} B" in str(body)
+    assert f"({fmt_size(stored)};" in str(body)
+
+
+def test_delete_dialog_formats_the_stored_size(prov, monkeypatch):
+    from axism.tui.app import _format_session_delete_confirm
+    from axism.tui.details_view import fmt_size
+
+    monkeypatch.setattr(prov, "merge_live", lambda *a, **k: {})
+    plan = prov.plan_delete(A)
+    rows = plan.inventory.fragments[0]
+    rows.size_bytes = 5 * 1024 + 512
+    sess = prov.find_session(A)[1]
+    body, _ = _format_session_delete_confirm([sess], [plan], [], prov)
+    text = str(body)
+    assert f"stored in the agent's database ({fmt_size(rows.size_bytes)};" in text, text
+    assert "5.5KB" in text
+    assert f"({rows.size_bytes} B;" not in text
 
 
 def test_print_only_pastes_correctly_with_spaces_in_the_data_folder(
