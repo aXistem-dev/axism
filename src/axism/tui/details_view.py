@@ -1,14 +1,16 @@
 """Text of the details pane for one session: facts first, then the last exchange.
 
 Pure functions (no widgets, no provider calls) so the layout is easy to test
-with a fixed clock.
+with a fixed clock. The result is a ``Content``: aXism's own labels carry the
+styles, and every piece of session text (title, folder, prompts, replies,
+model, note) goes in as plain text, so it is never read as markup.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from textual.markup import escape
+from textual.content import Content
 
 from axism.details import SessionDetails
 from axism.discover import SessionMeta
@@ -146,12 +148,20 @@ def _count(value: object) -> str:
         return str(value)
 
 
-def _fact(label: str, value: str) -> str:
-    return f"[$text-muted]{label:<{_LABEL_WIDTH}}[/]{escape(value)}"
+def _fact(label: str, value: str) -> Content:
+    return Content.assemble((f"{label:<{_LABEL_WIDTH}}", "$text-muted"), value)
 
 
-def _block(heading: str, text: str, *, max_lines: int = BLOCK_LINES) -> list[str]:
-    return ["", f"[b $primary]{heading}[/]", escape(trim_block(text, max_lines=max_lines))]
+def _block(heading: str, text: str, *, max_lines: int = BLOCK_LINES) -> list[Content]:
+    return [
+        Content(""),
+        Content.styled(heading, "bold $primary"),
+        Content(trim_block(text, max_lines=max_lines)),
+    ]
+
+
+def _join(lines: list[Content]) -> Content:
+    return Content("\n").join(lines)
 
 
 def session_details_text(
@@ -163,11 +173,11 @@ def session_details_text(
     database: bool,
     now: datetime,
     home: str,
-) -> str:
-    """Markup for the details pane. ``details`` is None while it is loading."""
+) -> Content:
+    """The details pane's content. ``details`` is None while it is loading."""
     title = session.display_title.replace("\n", " ")
-    lines = [
-        f"[b $accent]{escape(title)}[/]",
+    lines: list[Content] = [
+        Content.styled(title, "bold $accent"),
         _fact("agent", agent),
         _fact("state", state),
         _fact("folder", tilde(session.cwd, home) if session.cwd else "-"),
@@ -180,8 +190,8 @@ def session_details_text(
     lines.append(_fact("updated", readable_time(session.mtime, now)))
     lines.append(_fact("storage", storage_line(session, database=database)))
     if details is None:
-        lines += ["", "[$text-muted]Loading the conversation…[/]"]
-        return "\n".join(lines)
+        lines += [Content(""), Content.styled("Loading the conversation…", "$text-muted")]
+        return _join(lines)
     if details.turns is not None and not details.note:
         lines.append(_fact("turns", str(details.turns)))
     if details.model:
@@ -196,8 +206,8 @@ def session_details_text(
     if tokens:
         lines.append(_fact("tokens", " · ".join(tokens)))
     if details.note:
-        lines += ["", f"[$text-warning]{escape(details.note)}[/]"]
-        return "\n".join(lines)
+        lines += [Content(""), Content.styled(details.note, "$text-warning")]
+        return _join(lines)
     first = details.first_prompt or session.first_prompt
     if first and first.strip() != (details.last_prompt or "").strip():
         lines += _block("First prompt", first, max_lines=FIRST_PROMPT_LINES)
@@ -205,5 +215,8 @@ def session_details_text(
         lines += _block("Last prompt", details.last_prompt)
     if details.last_reply:
         lines += _block("Last reply", details.last_reply)
-    lines += ["", "[$text-muted]Enter reads the whole conversation[/]"]
-    return "\n".join(lines)
+    lines += [
+        Content(""),
+        Content.styled("Enter reads the whole conversation", "$text-muted"),
+    ]
+    return _join(lines)

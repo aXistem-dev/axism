@@ -171,7 +171,7 @@ def _text(meta: SessionMeta, details: SessionDetails | None, *, database=False) 
     return session_details_text(
         meta, details, agent="Claude Code", state="not running",
         database=database, now=datetime(2026, 10, 28, 7, 1).astimezone(), home="/home/alice",
-    )
+    ).plain
 
 
 def test_storage_line_variants():
@@ -184,12 +184,12 @@ def test_storage_line_variants():
     assert "2.0KB · stored in the agent's database" in out
 
 
-def test_details_text_escapes_markup_and_uses_tilde():
+def test_details_text_keeps_brackets_and_uses_tilde():
     meta = _meta(title="[b]not bold[/b]", cwd="/home/alice/src/[x]")
     out = _text(meta, SessionDetails(last_prompt="see [red]this[/red]"))
-    assert "\\[b]not bold" in out
-    assert "~/src/" in out and "/home/alice/src" not in out
-    assert "see \\[red]this" in out
+    assert "[b]not bold[/b]" in out
+    assert "~/src/[x]" in out and "/home/alice/src" not in out
+    assert "see [red]this[/red]" in out
 
 
 def test_details_text_while_loading_and_on_odd_numbers():
@@ -557,3 +557,84 @@ def test_claude_details_created_from_first_record(tmp_path):
     meta = _meta(transcript_path=path, size_bytes=path.stat().st_size)
     d = ClaudeCodeProvider(config_dir=tmp_path).session_details(meta)
     assert d.created == datetime.fromisoformat("2026-01-01T00:00:00+00:00").timestamp()
+
+
+# ---- agent text is shown verbatim, never parsed as markup ------------------------
+
+TRICKY = (
+    'echo "${arr[$i]}"',
+    "Use [B]x[/B] or [$accent] ok",
+    "[bold]not bold[/bold]",
+    "line ends in \\",
+)
+
+
+def _assert_verbatim(rendered: str, pieces=TRICKY) -> None:
+    for piece in pieces:
+        assert piece in rendered, (piece, rendered)
+    assert "\\\\" not in rendered
+
+
+@pytest.mark.parametrize("size", SIZES)
+def test_agent_text_is_verbatim_in_details_and_reader(tmp_path, monkeypatch, size):
+    claude = tmp_path / "claude"
+    rows = _conversation(
+        SID_A, "[bold]not bold[/bold]",
+        [
+            ("first: " + TRICKY[1], "first reply " + TRICKY[0]),
+            ("\n".join(TRICKY), "\n".join(TRICKY)),
+        ],
+        model="[$accent] model \\",
+    )
+    write_jsonl(claude / "projects" / SLUG / f"{SID_A}.jsonl", rows)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude))
+    _settings(
+        tmp_path, monkeypatch, "claude_code",
+        {"claude_code": {"enabled": True, "config_dir": str(claude)}},
+    )
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=size) as pilot:
+            await _focus_sessions(app, pilot)
+            text = _detail_text(app)
+            _assert_verbatim(text)
+            assert "[$accent] model \\" in text
+            assert "first: " + TRICKY[1] in text  # first prompt
+            await pilot.press("enter", "enter")
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, ReaderScreen)
+            header = str(screen.query_one("#reader-header").render())
+            assert "[bold]not bold[/bold] · Claude Code" in header
+            body = str(screen.query_one("#reader-body").render())
+            _assert_verbatim(body)
+            assert "first reply " + TRICKY[0] in body
+
+    _run(main())
+
+
+def test_note_and_folder_are_verbatim(tmp_path, monkeypatch):
+    note = "Cannot read [$accent] " + TRICKY[0] + " \\"
+    _setup_claude(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        ClaudeCodeProvider, "session_details", lambda self, s: SessionDetails(note=note)
+    )
+
+    def fail(self, s):
+        raise TranscriptUnavailable(note)
+
+    monkeypatch.setattr(ClaudeCodeProvider, "transcript", fail)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await _focus_sessions(app, pilot)
+            assert note in _detail_text(app)
+            await pilot.press("enter", "enter")
+            await pilot.pause()
+            assert note in str(app.screen.query_one("#reader-body").render())
+
+    _run(main())
+    meta = _meta(cwd="/home/alice/src/[$x]/[B]y[/B]\\")
+    assert "~/src/[$x]/[B]y[/B]\\" in _text(meta, SessionDetails())

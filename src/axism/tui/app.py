@@ -13,6 +13,7 @@ from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.content import Content
 from textual.events import Resize
 from textual.screen import ModalScreen
 from textual.theme import Theme
@@ -715,8 +716,8 @@ class DetailPane(VerticalScroll):
     def compose(self) -> ComposeResult:
         yield self._body
 
-    def update(self, content: str, *, subject: str | None = None) -> None:
-        """Replace the details text.
+    def update(self, content: str | Content, *, subject: str | None = None) -> None:
+        """Replace the details text (markup string, or ``Content`` for session text).
 
         ``subject`` names what is shown (a session or project key). The pane
         goes back to the top only when the subject changes, so re-rendering
@@ -1895,7 +1896,7 @@ class SessionManagerApp(App[None]):
             text += " · remote"
         return text
 
-    def _session_detail_text(self, s: SessionMeta) -> str:
+    def _session_detail_text(self, s: SessionMeta) -> Content:
         """Facts for ``s``; the conversation part loads lazily on a cache miss."""
         key = self._details_key(s)
         details = self._details_cache.get(key)

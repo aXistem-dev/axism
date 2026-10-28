@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from textual.app import ComposeResult
 from textual.containers import ScrollableContainer, VerticalScroll
-from textual.markup import escape
+from textual.content import Content
 from textual.screen import Screen
 from textual.widgets import Static
 
@@ -32,16 +32,26 @@ def _one_line(text: str) -> str:
     return " ".join(str(text).split())
 
 
-def conversation_markup(turns: list[Turn]) -> str:
-    """Alternating ``You`` / ``Agent`` blocks, the turn text escaped."""
+def conversation_content(turns: list[Turn]) -> Content:
+    """Alternating ``You`` / ``Agent`` blocks.
+
+    Only the role names carry styles; the turn text goes in as plain text, so
+    brackets, ``$`` and backslashes in a conversation are shown as written.
+    """
     if not turns:
-        return "[$text-muted]No text turns in this conversation.[/]"
-    blocks: list[str] = []
+        return Content.styled("No text turns in this conversation.", "$text-muted")
+    blocks: list[Content] = []
     for turn in turns:
         name = ROLE_NAMES.get(turn.role, turn.role.capitalize() or "?")
         colour = "$accent" if turn.role == "user" else "$primary"
-        blocks.append(f"[b {colour}]{escape(name)}[/]\n{escape(turn.content.strip())}")
-    return "\n\n".join(blocks)
+        blocks.append(
+            Content.assemble((name, f"bold {colour}"), "\n", turn.content.strip())
+        )
+    return Content("\n\n").join(blocks)
+
+
+def _note(text: str) -> Content:
+    return Content.styled(_one_line(text), "$text-warning")
 
 
 class ReaderScreen(ScrollKeys, Screen[None]):
@@ -90,15 +100,15 @@ class ReaderScreen(ScrollKeys, Screen[None]):
         )
         yield ContextFooter(self.SCOPE)
 
-    def _body(self) -> str:
+    def _body(self) -> Content:
         """The conversation, or one line saying why it cannot be shown."""
         try:
             turns = self.provider.transcript(self.session)
         except TranscriptUnavailable as exc:
-            return f"[$text-warning]{escape(_one_line(exc.reason))}[/]"
+            return _note(exc.reason)
         except Exception as exc:  # an agent's odd data must not crash the app
-            return f"[$text-warning]Cannot read conversation: {escape(_one_line(exc))}[/]"
-        return conversation_markup(turns)
+            return _note(f"Cannot read conversation: {exc}")
+        return conversation_content(turns)
 
     def scroll_view(self) -> ScrollableContainer:
         return self.query_one("#reader-scroll", VerticalScroll)
