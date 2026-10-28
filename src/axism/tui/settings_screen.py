@@ -408,12 +408,17 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
         return Settings(active_provider=self._default, providers=providers)
 
     def missing_folders(self, settings: Settings) -> list[str]:
-        """``Label: folder`` for every switched-on agent whose folder does not exist."""
+        """``Label: folder …`` for every switched-on agent whose folder is missing or unreadable."""
         lines = []
         for pid in self._provider_ids:
             prefs = settings.providers[pid]
-            if prefs.enabled and prefs.config_dir and not Path(prefs.config_dir).is_dir():
+            if not (prefs.enabled and prefs.config_dir):
+                continue
+            state = folder_state(Path(prefs.config_dir))
+            if state == "missing":
                 lines.append(f"{_label(pid)}: {prefs.config_dir} does not exist")
+            elif state == "unreadable":
+                lines.append(f"{_label(pid)}: {prefs.config_dir} is unreadable")
         return lines
 
     def action_save(self) -> None:
@@ -433,10 +438,12 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
             else:
                 self._say("Not saved: fix the folder or press Enter again")
 
+        unreadable = any(line.endswith(" is unreadable") for line in missing)
         self.app.push_screen(
             ConfirmDeleteScreen(
-                "Save anyway? An agent shows no sessions until its folder exists.",
-                title="Folder not found",
+                "Save anyway? An agent shows no sessions until its folder exists"
+                + (" and can be read." if unreadable else "."),
+                title="Folder not usable" if unreadable else "Folder not found",
                 warnings=missing,
                 confirm_verb="Save anyway",
                 warning=True,

@@ -836,3 +836,75 @@ def test_a_failing_agent_does_not_stall_later_rows(tmp_path, monkeypatch):
             await pilot.press("escape")
 
     _run(main())
+
+
+# ---- save check on folders that cannot be read ------------------------------------
+
+_SKIP_ROOT = pytest.mark.skipif(
+    hasattr(__import__("os"), "geteuid") and __import__("os").geteuid() == 0,
+    reason="permissions do not apply to root",
+)
+
+
+@_SKIP_ROOT
+def test_save_with_a_folder_behind_an_unreadable_parent_asks_instead_of_crashing(
+    tmp_path, monkeypatch
+):
+    _setup(tmp_path, monkeypatch)
+    gate = tmp_path / "gate"
+    gate.mkdir()
+    typed = gate / "sub" / "hermes"
+    before = _settings_file(tmp_path).read_bytes()
+    gate.chmod(0)
+    try:
+
+        async def main():
+            app = SessionManagerApp()
+            async with app.run_test(size=(120, 40)) as pilot:
+                screen = await _open(app, pilot)
+                await _highlight(screen, pilot, "hermes")
+                await pilot.press("tab")
+                screen.query_one("#settings-path", Input).value = str(typed)
+                await pilot.press("enter")
+                await pilot.pause()
+                await pilot.pause()
+                dialog = app.screen
+                assert isinstance(dialog, ConfirmDeleteScreen)
+                lines = "\n".join(dialog.warnings)
+                assert f"Hermes: {typed} is unreadable" in lines, lines
+                assert "does not exist" not in lines
+                await pilot.press("n")
+                await pilot.pause()
+                assert app.screen is screen
+
+        _run(main())
+    finally:
+        gate.chmod(0o700)
+    assert _settings_file(tmp_path).read_bytes() == before
+
+
+@_SKIP_ROOT
+def test_save_check_lists_missing_and_unreadable_folders_separately(tmp_path):
+    from axism.settings import ProviderPrefs, Settings
+
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    readable = tmp_path / "ok"
+    readable.mkdir()
+    settings = Settings(
+        providers={
+            "claude_code": ProviderPrefs(enabled=True, config_dir=str(readable)),
+            "cursor": ProviderPrefs(enabled=True, config_dir=str(tmp_path / "gone")),
+            "hermes": ProviderPrefs(enabled=True, config_dir=str(locked / "inner")),
+            "opencode": ProviderPrefs(enabled=False, config_dir=str(locked / "inner")),
+        }
+    )
+    locked.chmod(0)
+    try:
+        lines = SettingsScreen(settings, session_counts={}).missing_folders(settings)
+    finally:
+        locked.chmod(0o700)
+    assert lines == [
+        f"Cursor: {tmp_path / 'gone'} does not exist",
+        f"Hermes: {locked / 'inner'} is unreadable",
+    ]
