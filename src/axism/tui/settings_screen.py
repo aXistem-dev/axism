@@ -4,7 +4,8 @@ Space switches the highlighted agent on or off, ``*`` makes it the CLI default
 (the agent commands use without ``--provider``), Tab goes to its folder field,
 Enter saves and Esc cancels. Each row shows the agent's id and a status
 worked out once when the screen opens: ``found · N sessions``,
-``folder missing`` or ``command not installed``.
+``folder missing`` or ``command not installed``. A settings.json that could
+not be read is never replaced: the screen says why and Enter saves nothing.
 """
 
 from __future__ import annotations
@@ -35,6 +36,8 @@ MARK_OFF = "☐"
 
 # While the folder field has focus only these act (Inputs win).
 SETTINGS_INPUT_ACTIONS = frozenset({"cancel", "save", "focus_folder", "focus_list"})
+
+UNREADABLE_REFUSAL = "settings.json could not be read — fix or remove it first"
 
 FOLDER_MISSING = "folder missing"
 COMMAND_MISSING = "command not installed"
@@ -178,6 +181,11 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
         option_list.highlighted = idx
         self._load_path_input(self._provider_ids[idx])
         option_list.focus()
+        reason = self._settings.load_error()
+        if reason:
+            self._say(
+                f"settings.json could not be read ({reason}) — fix or remove it first"
+            )
 
     def check_action(
         self, action: str, parameters: tuple[object, ...]
@@ -303,6 +311,10 @@ class SettingsScreen(OptionListKeys, DialogScreen[Settings | None]):
         return lines
 
     def action_save(self) -> None:
+        if self._settings.load_error():
+            # The same rule as the CLI: a file that could not be read is never replaced.
+            self._say(UNREADABLE_REFUSAL)
+            return
         updated = self.result()
         missing = self.missing_folders(updated)
         if not missing:

@@ -64,7 +64,7 @@ from axism.tui.footer import ContextFooter
 from axism.tui.help import HelpScreen, RegistryCommands
 from axism.tui.keys import REGISTRY, bindings_for
 from axism.tui.reader import ReaderScreen
-from axism.tui.settings_screen import SettingsScreen
+from axism.tui.settings_screen import UNREADABLE_REFUSAL, SettingsScreen
 
 # Registry scopes whose keys are bound on the main screen.
 MAIN_SCREEN_SCOPES = ("main", "projects", "sessions", "details", "filter")
@@ -2070,8 +2070,11 @@ class SessionManagerApp(App[None]):
             if updated is None:
                 self._show_toast("Settings cancelled", success=False, seconds=2)
                 return
+            if self._axism_settings.load_error():
+                # Never replace a settings file that could not be read.
+                self._show_toast(UNREADABLE_REFUSAL, success=False, seconds=4)
+                return
             try:
-                # An explicit save may replace a settings file that could not be read.
                 path = save_settings(updated)
             except OSError as exc:
                 self._show_toast(f"Could not save settings: {exc}", success=False, seconds=4)

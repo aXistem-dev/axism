@@ -347,7 +347,7 @@ def test_settings_uses_app_settings_object(tmp_path, monkeypatch):
     _run(main())
 
 
-def test_unreadable_settings_are_written_only_on_save(tmp_path, monkeypatch):
+def test_unreadable_settings_are_never_overwritten(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
     _settings_file(tmp_path).write_text("{not json", encoding="utf-8")
 
@@ -359,15 +359,48 @@ def test_unreadable_settings_are_written_only_on_save(tmp_path, monkeypatch):
             screen = await _open(app, pilot)
             # Detection switched Claude Code on (its folder has sessions).
             assert "☑" in _rows(screen)[0]
-            await pilot.press("escape")
-            await pilot.pause()
-            assert _settings_file(tmp_path).read_text(encoding="utf-8") == "{not json"
-            await _open(app, pilot)
+            message = _text(screen, "#settings-message")
+            assert "settings.json could not be read (not valid JSON)" in message
+            assert "fix or remove it first" in message
             await pilot.press("enter")
             await pilot.pause()
+            assert app.screen is screen
+            message = _text(screen, "#settings-message")
+            assert "settings.json could not be read" in message
+            assert "fix or remove it first" in message
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not isinstance(app.screen, SettingsScreen)
 
     _run(main())
-    assert _file(tmp_path)["providers"]["claude_code"]["enabled"] is True
+    assert _settings_file(tmp_path).read_text(encoding="utf-8") == "{not json"
+
+
+@pytest.mark.parametrize("size", SIZES)
+def test_settings_refuses_to_replace_a_file_with_a_trailing_comma(
+    tmp_path, monkeypatch, size
+):
+    _setup(tmp_path, monkeypatch)
+    original = (
+        '{"active_provider": "hermes", "providers": '
+        '{"hermes": {"config_dir": "/home/alice/h"},}}'
+    )
+    _settings_file(tmp_path).write_text(original, encoding="utf-8")
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=size) as pilot:
+            screen = await _open(app, pilot)
+            await _highlight(screen, pilot, "cursor")
+            await pilot.press("space")
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.pause()
+            assert app.screen is screen
+            assert "fix or remove it first" in _text(screen, "#settings-message")
+
+    _run(main())
+    assert _settings_file(tmp_path).read_text(encoding="utf-8") == original
 
 
 @pytest.mark.parametrize("size", SIZES)
