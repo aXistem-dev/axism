@@ -78,15 +78,16 @@ def _scopes(*names: str) -> frozenset[str]:
 _MOVE = _scopes(
     "projects", "sessions", "details", "reader", "help",
     "dialog:confirm", "dialog:version", "dialog:move", "dialog:agent", "dialog:theme",
+    "settings",
 )
 _LISTS = _scopes("projects", "sessions", "details")
 _SESSIONS = _scopes("sessions", "details")
 # Dialogs that ask a yes / no question.
 _QUESTIONS = _scopes("dialog:confirm", "dialog:quit")
 # Dialogs where Enter applies the choice or the typed text.
-_APPLY = _scopes("dialog:rename", "dialog:move", "dialog:agent", "dialog:theme", "settings")
+_APPLY = _scopes("dialog:rename", "dialog:move", "dialog:agent", "dialog:theme")
 # Dialogs that Esc cancels.
-_CANCEL = _QUESTIONS | _APPLY
+_CANCEL = _QUESTIONS | _APPLY | _scopes("settings")
 
 REGISTRY: tuple[KeyAction, ...] = (
     # --- Everywhere: movement -------------------------------------------------
@@ -276,13 +277,13 @@ REGISTRY: tuple[KeyAction, ...] = (
     ),
     KeyAction(
         "apply", ("enter",), "Apply",
-        "Apply: the new title, the move target, the agent, the theme or the settings",
+        "Apply: the new title, the move target, the agent or the theme",
         "Dialogs", _APPLY, footer_priority=10, palette=False, priority=True,
     ),
     KeyAction(
         "focus_path", ("tab",), "Path",
-        "Move and Settings: go to the path field",
-        "Dialogs", _scopes("dialog:move", "settings"),
+        "Move: go to the path field",
+        "Dialogs", _scopes("dialog:move"),
         footer_priority=30, palette=False, priority=True,
     ),
     KeyAction(
@@ -316,11 +317,26 @@ REGISTRY: tuple[KeyAction, ...] = (
         "Close the version window",
         "Dialogs", _scopes("dialog:version"), palette=False, priority=True,
     ),
-    # --- Settings (reworked with the Settings screen) -------------------------
+    # --- Settings -------------------------------------------------------------
     KeyAction(
-        "toggle_enabled", ("space",), "Include",
-        "Include or leave out the highlighted agent",
+        "toggle_enabled", ("space",), "On/off",
+        "Switch the highlighted agent on or off (its sessions join the app)",
+        "Settings", _scopes("settings"), footer_priority=10, palette=False,
+    ),
+    KeyAction(
+        "set_default", ("asterisk",), "Default",
+        "Make the highlighted agent the CLI default (commands without --provider)",
         "Settings", _scopes("settings"), footer_priority=20, palette=False,
+    ),
+    KeyAction(
+        "save", ("enter",), "Save",
+        "Save the settings and close",
+        "Settings", _scopes("settings"), footer_priority=30, palette=False, priority=True,
+    ),
+    KeyAction(
+        "focus_folder", ("tab",), "Folder",
+        "Settings: go to the folder field",
+        "Settings", _scopes("settings"), footer_priority=40, palette=False, priority=True,
     ),
 )
 

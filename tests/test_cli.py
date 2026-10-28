@@ -159,3 +159,150 @@ def test_delete_malformed_or_uppercase_uuid_never_exits_zero_empty(fake_root: Pa
     assert _run(["delete", "99999999-9999-9999-9999-99999999999f\n", "--dry-run"]) == 2
     assert _run(["delete", "99999999-9999-9999-9999-99999999999F", "--dry-run"]) == 2
     assert _run(["delete", SESSION_A.upper(), "--dry-run"]) == 0
+
+
+# ---- providers --default / --enable / --disable, tui --provider / --config-dir ----
+
+
+def _write_choice(cfg: Path, active: str, enabled: dict[str, bool]) -> Path:
+    path = cfg / "settings.json"
+    path.write_text(
+        json.dumps(
+            {
+                "active_provider": active,
+                "providers": {pid: {"enabled": on} for pid, on in enabled.items()},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _saved_choice(path: Path) -> tuple[str, dict[str, bool]]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data["active_provider"], {
+        pid: prefs["enabled"] for pid, prefs in data["providers"].items()
+    }
+
+
+def _line(out: str, pid: str) -> str:
+    return next(ln for ln in out.splitlines() if f" {pid} " in ln)
+
+
+ALL_OFF_BUT_CLAUDE = {"claude_code": True, "cursor": False, "hermes": False, "opencode": False}
+
+
+def test_providers_default_enable_disable(_isolated_settings: Path, fake_root: Path, capsys):
+    path = _write_choice(_isolated_settings, "claude_code", ALL_OFF_BUT_CLAUDE)
+
+    assert _run(["providers", "--enable", "cursor"]) == 0
+    out = capsys.readouterr().out
+    assert _saved_choice(path) == ("claude_code", {**ALL_OFF_BUT_CLAUDE, "cursor": True})
+    assert "enabled" in _line(out, "cursor")
+    assert _line(out, "claude_code").startswith("*")
+    legend = [ln for ln in out.splitlines() if ln.startswith("* = ")]
+    assert legend == ["* = CLI default (used when a command gets no --provider)"]
+
+    assert _run(["providers", "--default", "cursor"]) == 0
+    out = capsys.readouterr().out
+    assert _saved_choice(path)[0] == "cursor"
+    assert _line(out, "cursor").startswith("*")
+    assert not _line(out, "claude_code").startswith("*")
+
+    assert _run(["providers", "--disable", "claude_code"]) == 0
+    out = capsys.readouterr().out
+    assert _saved_choice(path) == ("cursor", {**ALL_OFF_BUT_CLAUDE, "claude_code": False,
+                                             "cursor": True})
+    assert "disabled" in _line(out, "claude_code")
+
+    # One call can switch an agent on and make it the default.
+    assert _run(["providers", "--enable", "hermes", "--default", "hermes"]) == 0
+    assert _saved_choice(path)[0] == "hermes"
+
+
+def test_providers_plain_listing_explains_the_marker(
+    _isolated_settings: Path, fake_root: Path, capsys
+):
+    _write_choice(_isolated_settings, "claude_code", ALL_OFF_BUT_CLAUDE)
+    assert _run(["providers"]) == 0
+    out = capsys.readouterr().out
+    assert sum(ln.startswith("* = ") for ln in out.splitlines()) == 1
+
+
+def test_providers_refusals(_isolated_settings: Path, fake_root: Path, capsys):
+    path = _write_choice(_isolated_settings, "claude_code", ALL_OFF_BUT_CLAUDE)
+    before = path.read_bytes()
+
+    assert _run(["providers", "--default", "codex"]) == 2
+    err = capsys.readouterr().err
+    assert "unknown agent 'codex'" in err and "claude_code" in err
+    assert _run(["providers", "--enable", "codex"]) == 2
+    assert _run(["providers", "--disable", "codex"]) == 2
+
+    assert _run(["providers", "--disable", "claude_code"]) == 1
+    assert "only agent switched on" in capsys.readouterr().err
+
+    assert _run(["providers", "--default", "cursor"]) == 1
+    assert "Cursor is switched off" in capsys.readouterr().err
+
+    assert _run(["providers", "--enable", "cursor", "--disable", "cursor"]) == 2
+    capsys.readouterr()
+    assert path.read_bytes() == before
+
+    # The default cannot be switched off; another agent must become the default first.
+    _write_choice(_isolated_settings, "claude_code", {**ALL_OFF_BUT_CLAUDE, "cursor": True})
+    before = path.read_bytes()
+    assert _run(["providers", "--disable", "claude_code"]) == 1
+    assert "Claude Code is the CLI default" in capsys.readouterr().err
+    assert path.read_bytes() == before
+    assert _run(["providers", "--default", "cursor", "--disable", "claude_code"]) == 0
+    assert _saved_choice(path)[0] == "cursor"
+
+    # An unreadable settings file is never overwritten.
+    path.write_text("{not json", encoding="utf-8")
+    assert _run(["providers", "--enable", "hermes"]) == 1
+    assert "could not be read" in capsys.readouterr().err
+    assert path.read_text(encoding="utf-8") == "{not json"
+
+
+def test_tui_provider_and_config_dir_apply_for_run_only(
+    _isolated_settings: Path,
+    fake_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from axism.tui import app as tui_app
+
+    path = _write_choice(
+        _isolated_settings,
+        "claude_code",
+        {"claude_code": True, "cursor": True, "hermes": False, "opencode": False},
+    )
+    before = path.read_bytes()
+    monkeypatch.setenv("CURSOR_DATA_DIR", str(tmp_path / "cursor-home"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(fake_root))
+    seen: list[tui_app.SessionManagerApp] = []
+    monkeypatch.setattr(
+        tui_app.SessionManagerApp, "run", lambda self, *a, **k: seen.append(self)
+    )
+    other = tmp_path / "other-cursor"
+    other.mkdir()
+
+    assert _run(["tui", "--provider", "cursor", "--config-dir", str(other)]) == 0
+    app = seen[-1]
+    assert [p.name for p in app.providers] == ["cursor"]
+    assert app.providers[0].config_root() == other.resolve()
+    assert app.provider.name == "cursor"
+
+    assert _run(["tui", "--provider", "hermes"]) == 0
+    assert [p.name for p in seen[-1].providers] == ["hermes"]
+
+    # Without --provider the folder applies to the CLI default (Claude Code).
+    claude_other = tmp_path / "claude-other"
+    claude_other.mkdir()
+    assert _run(["tui", "--config-dir", str(claude_other)]) == 0
+    roots = {p.name: p.config_root() for p in seen[-1].providers}
+    assert roots["claude_code"] == claude_other.resolve()
+    assert set(roots) == {"claude_code", "cursor"}
+
+    assert path.read_bytes() == before

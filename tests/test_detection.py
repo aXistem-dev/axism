@@ -223,7 +223,7 @@ def test_cli_tui_subcommand_prints_no_detection_line(
     import axism.tui.app as tui_app
 
     _claude_data(env["claude"])
-    monkeypatch.setattr(tui_app, "run_tui", lambda: None)
+    monkeypatch.setattr(tui_app, "run_tui", lambda **_kw: None)
     with pytest.raises(SystemExit):
         cli.main(["tui"])
     assert capsys.readouterr().err == ""

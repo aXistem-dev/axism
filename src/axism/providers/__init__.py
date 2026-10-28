@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from axism.providers.base import (
@@ -41,7 +42,10 @@ __all__ = [
     "SessionProvider",
     "UnsupportedOperation",
     "default_provider",
+    "default_provider_id",
+    "default_refusal",
     "detect_undecided_providers",
+    "disable_refusal",
     "enabled_providers_from_settings",
     "federate_discover",
     "federate_merge_live",
@@ -90,6 +94,40 @@ def get_provider(
 
         return OpenCodeProvider(config_dir=config_dir)
     raise KeyError(f"unknown provider: {name!r}")
+
+
+def default_provider_id(settings: Settings) -> str:
+    """The CLI default agent: ``active_provider`` when known and switched on,
+    otherwise Claude Code."""
+    name = settings.active_provider
+    prefs = settings.providers.get(name)
+    if name not in PROVIDER_LABELS or (prefs is not None and not prefs.enabled):
+        return DEFAULT_PROVIDER
+    return name
+
+
+def disable_refusal(enabled: Mapping[str, bool], default: str, name: str) -> str:
+    """Why ``name`` may not be switched off ('' when it may).
+
+    At least one agent stays on, and the CLI default stays on (another agent
+    has to become the default first). ``enabled`` maps agent ids to on/off.
+    """
+    if not enabled.get(name, False):
+        return ""
+    label = PROVIDER_LABELS.get(name, name)
+    if sum(1 for on in enabled.values() if on) <= 1:
+        return f"{label} is the only agent switched on; at least one has to stay on"
+    if name == default:
+        return f"{label} is the CLI default; make another agent the default first"
+    return ""
+
+
+def default_refusal(enabled: Mapping[str, bool], name: str) -> str:
+    """Why ``name`` may not become the CLI default ('' when it may)."""
+    if enabled.get(name, False):
+        return ""
+    label = PROVIDER_LABELS.get(name, name)
+    return f"{label} is switched off; switch it on before making it the CLI default"
 
 
 def provider_from_settings(settings: Settings | None = None) -> SessionProvider:

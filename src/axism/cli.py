@@ -15,15 +15,19 @@ from axism.providers import (
     PROVIDER_LABELS,
     SessionProvider,
     UnsupportedOperation,
+    default_provider_id,
+    default_refusal,
     detect_undecided_providers,
+    disable_refusal,
     enabled_providers_from_settings,
     federate_discover,
     federate_merge_live,
     get_provider,
+    list_provider_ids,
     live_for_session,
     provider_from_settings,
 )
-from axism.settings import DEFAULT_PROVIDER, Settings, load_settings
+from axism.settings import Settings, load_settings, save_settings, settings_path
 
 
 def _fmt_size(n: int) -> str:
@@ -37,10 +41,7 @@ def _fmt_size(n: int) -> str:
 
 def _effective_provider_name(settings: Settings) -> str:
     """Active provider id, falling back to Claude Code when unknown or disabled."""
-    name = settings.active_provider
-    if name not in PROVIDER_LABELS or not settings.provider_prefs(name).enabled:
-        return DEFAULT_PROVIDER
-    return name
+    return default_provider_id(settings)
 
 
 def _settings(args: argparse.Namespace) -> Settings:
@@ -514,9 +515,81 @@ def cmd_purge_project(args: argparse.Namespace) -> int:
     return rc
 
 
+DEFAULT_LEGEND = "* = CLI default (used when a command gets no --provider)"
+
+
+def _change_providers(args: argparse.Namespace, settings: Settings) -> int | None:
+    """Apply ``--enable`` / ``--default`` / ``--disable`` and save.
+
+    Returns an exit code when the change is refused, ``None`` when it was
+    saved (or nothing was asked). Applied in that order, so one call can
+    switch an agent on and make it the default, or move the default away
+    from an agent and switch it off.
+    """
+    enable = getattr(args, "enable", None)
+    make_default = getattr(args, "default", None)
+    disable = getattr(args, "disable", None)
+    asked = [pid for pid in (enable, make_default, disable) if pid]
+    if not asked:
+        return None
+    known = list_provider_ids()
+    for pid in asked:
+        if pid not in known:
+            print(
+                f"axism: unknown agent {pid!r} (known: {', '.join(known)})",
+                file=sys.stderr,
+            )
+            return 2
+    if enable and enable == disable:
+        print(f"axism: cannot both enable and disable {enable}", file=sys.stderr)
+        return 2
+    if settings.load_error():
+        print(
+            f"axism: {settings_path()} could not be read ({settings.load_error()}); "
+            "fix or remove it first, nothing was changed",
+            file=sys.stderr,
+        )
+        return 1
+    enabled = {pid: settings.provider_prefs(pid).enabled for pid in known}
+    default = default_provider_id(settings)
+    if enable:
+        enabled[enable] = True
+    if make_default:
+        refusal = default_refusal(enabled, make_default)
+        if refusal:
+            print(f"axism: {refusal}", file=sys.stderr)
+            return 1
+        default = make_default
+    if disable:
+        refusal = disable_refusal(enabled, default, disable)
+        if refusal:
+            print(f"axism: {refusal}", file=sys.stderr)
+            return 1
+        enabled[disable] = False
+    for pid, on in enabled.items():
+        settings.provider_prefs(pid).enabled = on
+    if make_default:
+        settings.active_provider = make_default
+    try:
+        save_settings(settings)
+    except OSError as exc:
+        print(
+            f"axism: could not save settings: {exc.strerror or type(exc).__name__}",
+            file=sys.stderr,
+        )
+        return 1
+    return None
+
+
 def cmd_providers(args: argparse.Namespace) -> int:
-    """List registered backends and where each stores sessions."""
+    """List registered backends and where each stores sessions.
+
+    ``--enable`` / ``--disable`` / ``--default`` change and save the choice first.
+    """
     settings = _settings(args)
+    refused = _change_providers(args, settings)
+    if refused is not None:
+        return refused
     for pid, label in PROVIDER_LABELS.items():
         prefs = settings.provider_prefs(pid)
         marker = "*" if pid == settings.active_provider else " "
@@ -530,13 +603,18 @@ def cmd_providers(args: argparse.Namespace) -> int:
         state = "enabled" if prefs.enabled else "disabled"
         line = f"{marker} {pid:<12} {label:<14} {state:<9} {root}"
         print(f"{line}  ({note})" if note else line)
+    print(DEFAULT_LEGEND)
     return 0
 
 
-def cmd_tui(_args: argparse.Namespace) -> int:
+def cmd_tui(args: argparse.Namespace) -> int:
+    """Open the app; ``--provider`` / ``--config-dir`` apply to this run only."""
     from axism.tui.app import run_tui
 
-    run_tui()
+    run_tui(
+        provider=getattr(args, "provider", None),
+        config_dir=getattr(args, "config_dir", None),
+    )
     return 0
 
 
@@ -571,11 +649,35 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = p.add_subparsers(dest="command")
 
-    tui = sub.add_parser("tui", help="Open the Textual TUI (default)", parents=[common])
+    tui = sub.add_parser(
+        "tui",
+        help="Open the Textual TUI (default)",
+        description=(
+            "Open the app. --provider shows only that agent's sessions and "
+            "--config-dir uses another folder for that agent (or the CLI default "
+            "agent); both apply to this run only and are never saved."
+        ),
+        parents=[common],
+    )
     tui.set_defaults(func=cmd_tui)
 
     providers = sub.add_parser(
-        "providers", help="List backends and their config roots", parents=[common]
+        "providers",
+        help="List backends and their config roots; switch them on/off, set the default",
+        parents=[common],
+    )
+    providers.add_argument(
+        "--default",
+        metavar="ID",
+        help="Make this agent the CLI default (it has to be switched on)",
+    )
+    providers.add_argument(
+        "--enable", metavar="ID", help="Switch this agent on (its sessions join the app)"
+    )
+    providers.add_argument(
+        "--disable",
+        metavar="ID",
+        help="Switch this agent off (not the last one, not the CLI default)",
     )
     providers.set_defaults(func=cmd_providers)
 

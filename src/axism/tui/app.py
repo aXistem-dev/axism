@@ -15,13 +15,11 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.content import Content
 from textual.events import Resize
-from textual.screen import ModalScreen
 from textual.theme import Theme
 from textual.timer import Timer
 from textual.widget import Widget
-from textual.widgets import DataTable, Input, OptionList, Static
+from textual.widgets import DataTable, Input, Static
 from textual.widgets._header import HeaderClock, HeaderClockSpace
-from textual.widgets.option_list import Option
 
 from axism import __commit__, version_string
 from axism.actions import actions_failed, first_failure
@@ -33,6 +31,7 @@ from axism.providers import (
     PROVIDER_LABELS,
     SessionProvider,
     UnsupportedOperation,
+    default_provider_id,
     detect_undecided_providers,
     enabled_providers_from_settings,
     federate_discover,
@@ -40,13 +39,11 @@ from axism.providers import (
     get_provider,
     live_for_session,
     provider_by_name,
-    provider_config_hint,
     roots_summary,
 )
 from axism.providers.transfer import transfer_sessions
 from axism.settings import (
     DEFAULT_PROVIDER,
-    ProviderPrefs,
     Settings,
     load_settings,
     save_settings,
@@ -66,6 +63,7 @@ from axism.tui.footer import ContextFooter
 from axism.tui.help import HelpScreen, RegistryCommands
 from axism.tui.keys import REGISTRY, bindings_for
 from axism.tui.reader import ReaderScreen
+from axism.tui.settings_screen import SettingsScreen
 
 # Registry scopes whose keys are bound on the main screen.
 MAIN_SCREEN_SCOPES = ("main", "projects", "sessions", "details", "filter")
@@ -552,159 +550,6 @@ def _format_project_delete_confirm(
     return "\n".join(lines).rstrip(), warnings
 
 
-class SettingsScreen(ModalScreen[Settings | None]):
-    """Choose which backends to include, active default, and config dirs."""
-
-    BINDINGS = bindings_for("settings")
-
-    def __init__(self, settings: Settings) -> None:
-        super().__init__()
-        self._settings = settings
-        self._provider_ids = list(PROVIDER_LABELS.keys())
-        self._enabled = {
-            pid: settings.provider_prefs(pid).enabled for pid in self._provider_ids
-        }
-        self._config_dirs = {
-            pid: settings.provider_prefs(pid).config_dir for pid in self._provider_ids
-        }
-        self._path_for: str | None = None
-
-    def compose(self) -> ComposeResult:
-        active = self._settings.active_provider
-        if active not in self._provider_ids:
-            active = DEFAULT_PROVIDER
-        options: list[Option] = []
-        for pid in self._provider_ids:
-            label = PROVIDER_LABELS.get(pid, pid)
-            mark = MARK_ON if self._enabled.get(pid, True) else MARK_OFF
-            arrow = "→" if pid == active else " "
-            options.append(Option(f"{arrow} {mark} {label}  [{pid}]", id=pid))
-        prefs = self._settings.provider_prefs(active)
-        path_value = self._config_dirs.get(active) or prefs.config_dir or ""
-        yield Vertical(
-            Static("[b]Settings[/]  ·  providers + config dirs", id="settings-title"),
-            Static(
-                "Space includes a backend in the inventory. Enter sets the "
-                "highlighted one as the CLI default (→).",
-                id="settings-hint",
-            ),
-            OptionList(*options, id="settings-providers"),
-            Static(
-                "Config dir for highlighted provider (blank = default)",
-                id="settings-path-label",
-            ),
-            Input(
-                value=path_value,
-                placeholder=provider_config_hint(active),
-                id="settings-path",
-            ),
-            Static(
-                f"[$text-muted]Saved at {settings_path()}[/]\n"
-                "↑↓ provider · Space include · Tab path · Enter save · Esc cancel",
-                id="settings-footer",
-            ),
-            id="settings-dialog",
-        )
-
-    def on_mount(self) -> None:
-        option_list = self.query_one("#settings-providers", OptionList)
-        try:
-            idx = self._provider_ids.index(self._settings.active_provider)
-        except ValueError:
-            idx = 0
-        if self._provider_ids:
-            option_list.highlighted = idx
-            self._path_for = self._provider_ids[idx]
-        option_list.focus()
-
-    def _stash_path_input(self) -> None:
-        if self._path_for is None:
-            return
-        typed = self.query_one("#settings-path", Input).value.strip()
-        self._config_dirs[self._path_for] = typed or None
-
-    def _load_path_input(self, pid: str) -> None:
-        inp = self.query_one("#settings-path", Input)
-        inp.value = self._config_dirs.get(pid) or ""
-        inp.placeholder = provider_config_hint(pid)
-        self._path_for = pid
-
-    def _highlighted_provider(self) -> str | None:
-        option_list = self.query_one("#settings-providers", OptionList)
-        highlighted = option_list.highlighted
-        if highlighted is None:
-            return None
-        opt = option_list.get_option_at_index(highlighted)
-        return str(opt.id) if opt.id is not None else None
-
-    def _reload_provider_options(self) -> None:
-        option_list = self.query_one("#settings-providers", OptionList)
-        highlighted = option_list.highlighted
-        active = self._highlighted_provider() or self._settings.active_provider
-        option_list.clear_options()
-        for pid in self._provider_ids:
-            label = PROVIDER_LABELS.get(pid, pid)
-            mark = MARK_ON if self._enabled.get(pid, True) else MARK_OFF
-            arrow = "→" if pid == active else " "
-            option_list.add_option(Option(f"{arrow} {mark} {label}  [{pid}]", id=pid))
-        if highlighted is not None and highlighted < len(self._provider_ids):
-            option_list.highlighted = highlighted
-
-    def action_focus_path(self) -> None:
-        self.query_one("#settings-path", Input).focus()
-
-    def action_focus_list(self) -> None:
-        self.query_one("#settings-providers", OptionList).focus()
-
-    def action_toggle_enabled(self) -> None:
-        if self.focused is not None and self.focused.id == "settings-path":
-            return
-        pid = self._highlighted_provider()
-        if not pid:
-            return
-        # Keep at least one provider enabled.
-        currently = self._enabled.get(pid, True)
-        if currently and sum(1 for v in self._enabled.values() if v) <= 1:
-            return
-        self._enabled[pid] = not currently
-        self._reload_provider_options()
-
-    def on_option_list_option_highlighted(
-        self, event: OptionList.OptionHighlighted
-    ) -> None:
-        if event.option_list.id != "settings-providers":
-            return
-        pid = str(event.option.id) if event.option.id is not None else None
-        if not pid:
-            return
-        self._stash_path_input()
-        self._load_path_input(pid)
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
-
-    def action_cancel_picker(self) -> None:
-        self.dismiss(None)
-
-    def action_apply(self) -> None:
-        self._stash_path_input()
-        pid = self._highlighted_provider() or self._settings.active_provider
-        if pid not in self._provider_ids:
-            pid = DEFAULT_PROVIDER
-        providers: dict[str, ProviderPrefs] = {}
-        for name in self._provider_ids:
-            providers[name] = ProviderPrefs(
-                enabled=self._enabled.get(name, True),
-                config_dir=self._config_dirs.get(name),
-            )
-        if not providers.get(pid, ProviderPrefs()).enabled:
-            pid = next(
-                (p for p in self._provider_ids if self._enabled.get(p, True)),
-                DEFAULT_PROVIDER,
-            )
-        self.dismiss(Settings(active_provider=pid, providers=providers))
-
-
 class DetailPane(VerticalScroll):
     """Right pane: a focusable scroll view around the details text."""
 
@@ -892,43 +737,25 @@ class SessionManagerApp(App[None]):
         background: $error 45%;
         color: $text;
     }
-    #settings-dialog {
-        width: 80%;
-        height: auto;
-        max-height: 80%;
-        border: thick $primary;
-        background: $surface;
-        padding: 1 2;
-        margin: 2 4;
-    }
-    #settings-title {
-        text-style: bold;
-        margin-bottom: 1;
-        color: $accent;
-    }
-    #settings-hint, #settings-footer, #settings-path-label {
-        color: $text-muted;
-        margin-bottom: 1;
-    }
-    #settings-providers {
-        height: auto;
-        max-height: 12;
-        margin-bottom: 1;
-    }
-    #settings-path {
-        margin-bottom: 1;
-    }
     """
 
     # Every main-screen key comes from the key registry (tui/keys.py).
     BINDINGS = bindings_for(*MAIN_SCREEN_SCOPES)
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        run_provider: str | None = None,
+        run_config_dir: str | None = None,
+    ) -> None:
         super().__init__()
+        # ``axism tui --provider`` / ``--config-dir``: this run only, never saved.
+        self._run_provider = run_provider
+        self._run_config_dir = run_config_dir
         self._axism_settings = load_settings()
         detection = detect_undecided_providers(self._axism_settings)
         self._detection_message = detection.message() if detection.changed else ""
-        self.providers = enabled_providers_from_settings(self._axism_settings)
+        self.providers = self._providers_for(self._axism_settings)
         self.provider = (
             provider_by_name(self.providers, self._axism_settings.active_provider)
             or self.providers[0]
@@ -956,6 +783,22 @@ class SessionManagerApp(App[None]):
         self._details_timer: Timer | None = None
         # The single session the details pane shows (the reader opens it).
         self._detail_session: SessionMeta | None = None
+
+    def _providers_for(self, settings: Settings) -> list[SessionProvider]:
+        """Agents in the app's inventory: the switched-on ones, narrowed or
+        pointed at another folder by this run's ``--provider`` / ``--config-dir``."""
+        if self._run_provider:
+            prefs = settings.providers.get(self._run_provider)
+            folder = self._run_config_dir or (prefs.config_dir if prefs else None)
+            return [get_provider(self._run_provider, config_dir=folder)]
+        providers = enabled_providers_from_settings(settings)
+        if not self._run_config_dir:
+            return providers
+        name = default_provider_id(settings)
+        override = get_provider(name, config_dir=self._run_config_dir)
+        if any(p.name == name for p in providers):
+            return [override if p.name == name else p for p in providers]
+        return [override, *providers]
 
     def compose(self) -> ComposeResult:
         yield AxisHeader(show_clock=True)
@@ -2137,17 +1980,20 @@ class SessionManagerApp(App[None]):
         if not self._guard("show_settings"):
             return
 
+        previous_default = default_provider_id(self._axism_settings)
+
         def _after(updated: Settings | None) -> None:
             if updated is None:
                 self._show_toast("Settings cancelled", success=False, seconds=2)
                 return
             try:
+                # An explicit save may replace a settings file that could not be read.
                 path = save_settings(updated)
             except OSError as exc:
                 self._show_toast(f"Could not save settings: {exc}", success=False, seconds=4)
                 return
             self._axism_settings = updated
-            self.providers = enabled_providers_from_settings(updated)
+            self.providers = self._providers_for(updated)
             self.provider = (
                 provider_by_name(self.providers, updated.active_provider)
                 or self.providers[0]
@@ -2165,9 +2011,30 @@ class SessionManagerApp(App[None]):
                 msg = f"Saved {path.name} · {len(self.providers)} agents ({labels})"
             else:
                 msg = f"Saved {path.name} · {self.provider.label} → {self.root}"
+            new_default = default_provider_id(updated)
+            if new_default != previous_default:
+                msg += f" · CLI default: {PROVIDER_LABELS.get(new_default, new_default)}"
             self._show_toast(msg, success=True, seconds=4)
 
-        self.push_screen(SettingsScreen(load_settings()), _after)
+        self.push_screen(
+            SettingsScreen(self._axism_settings, session_counts=self._session_counts()),
+            _after,
+        )
+
+    def _session_counts(self) -> dict[tuple[str, str], int]:
+        """Sessions per (agent, folder) in the current inventory, for Settings."""
+        counts: dict[tuple[str, str], int] = {}
+        for provider in self.providers:
+            try:
+                root = str(provider.config_root())
+            except (OSError, UnsupportedOperation):
+                continue
+            counts[(provider.name, root)] = sum(
+                len(project.sessions)
+                for project in self.projects
+                if project.provider == provider.name
+            )
+        return counts
 
     def action_show_version(self) -> None:
         """Show version and runtime details."""
@@ -2902,8 +2769,9 @@ class SessionManagerApp(App[None]):
         self._confirm_delete_sessions(self._target_sessions_for_delete())
 
 
-def run_tui() -> None:
-    app = SessionManagerApp()
+def run_tui(provider: str | None = None, config_dir: str | None = None) -> None:
+    """Run the app; ``provider`` / ``config_dir`` apply to this run only."""
+    app = SessionManagerApp(run_provider=provider, run_config_dir=config_dir)
     result = app.run()
     if not isinstance(result, dict):
         return
