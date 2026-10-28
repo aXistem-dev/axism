@@ -276,12 +276,6 @@ def test_wal_database_with_an_open_writer_lists_sessions_and_adds_no_files(tmp_p
         writer.close()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=PermissionError,
-    reason="layout_status stats the database file unguarded, so an unreadable "
-    "folder raises instead of reporting 'unsupported'",
-)
 def test_unreadable_data_directory_degrades_to_unsupported(tmp_path):
     import os
 
@@ -295,3 +289,25 @@ def test_unreadable_data_directory_degrades_to_unsupported(tmp_path):
         assert discover.discover_all(root) == []
     finally:
         root.chmod(0o700)
+
+
+def test_provider_entry_points_survive_an_unreadable_data_folder(tmp_path):
+    import os
+
+    from axism.providers.opencode import OpenCodeProvider
+
+    parent = tmp_path / "locked-parent"
+    root = parent / "opencode"
+    _base(root)
+    parent.chmod(0)
+    try:
+        if os.access(parent, os.R_OK | os.X_OK):
+            pytest.skip("permissions are not enforced here (running as root)")
+        prov = OpenCodeProvider(config_dir=root)
+        assert prov.discover() == []
+        assert prov.merge_live(use_cli=False) == {}
+        assert isinstance(prov.status_note(), str)
+        assert prov.detect() in {True, False}
+        assert fragments.collect_fragments(root, "ses_a1").fragments == []
+    finally:
+        parent.chmod(0o700)

@@ -35,7 +35,11 @@ def collect_fragments(
 ) -> FragmentInventory:
     inv = FragmentInventory(session_id=session_id, project_slug=project_slug)
     db = db_path(root)
-    if db.is_file():
+    try:
+        present = db.is_file()
+    except OSError:
+        present = False
+    if present:
         # opencode.db is in PROTECTED_NAMES: shown for size, never unlinked.
         inv.fragments.append(
             Fragment(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,11 +42,13 @@ def _columns(con: sqlite3.Connection, table: str) -> set[str]:
 def layout_status(root: Path) -> str:
     """``missing`` (no DB), ``unsupported`` (layout/unreadable), or ``ok``."""
     db = db_path(root)
-    if not db.is_file():
-        return "missing"
     try:
+        if not db.is_file():
+            # Absent only if the folder can be read; otherwise we cannot tell.
+            readable = os.access(root, os.R_OK | os.X_OK) or not root.exists()
+            return "missing" if readable else "unsupported"
         con = connect(db)
-    except sqlite3.Error:
+    except (OSError, sqlite3.Error):
         return "unsupported"
     try:
         for table, needed in REQUIRED_COLUMNS.items():

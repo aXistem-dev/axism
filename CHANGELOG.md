@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- An unreadable OpenCode data folder is reported as unsupported instead of failing with a permission error
+
 ### Changed
 
 - Rename messages show the new title in plain quotes (no doubled backslash); `resume --print-only` prints a command that pastes correctly even with spaces in paths
