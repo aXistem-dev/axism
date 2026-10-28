@@ -65,3 +65,50 @@ def make_opencode_db(
     finally:
         con.close()
     return db
+
+
+# Server response shapes as OpenCode 2.1.4 prints them through ``opencode api``
+# (ids and paths synthetic).
+
+
+def session_info(
+    session_id: str,
+    project_id: str,
+    directory: str,
+    *,
+    created: int,
+    updated: int | None = None,
+    title: str = "Demo",
+) -> dict:
+    return {
+        "id": session_id,
+        "projectID": project_id,
+        "cost": 0,
+        "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {"read": 0, "write": 0},
+        },
+        "time": {"created": created, "updated": updated or created},
+        "title": title,
+        "location": {"directory": directory},
+    }
+
+
+def server_info(pid: int) -> dict:
+    return {
+        "version": "2.1.4",
+        "pid": pid,
+        "urls": ["http://127.0.0.1:4096"],
+        "paths": {"tmp": "/tmp/opencode"},
+        "capabilities": {"persistentPty": True},
+    }
+
+
+def not_found(session_id: str) -> dict:
+    return {
+        "_tag": "SessionNotFoundError",
+        "sessionID": session_id,
+        "message": f"Session not found: {session_id}",
+    }

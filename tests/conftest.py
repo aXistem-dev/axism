@@ -162,7 +162,7 @@ def _pinned_tmp_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 _REAL_WHICH = shutil.which
-_AGENT_BINARIES = {"claude", "hermes", "cursor-agent", "cursor"}
+_AGENT_BINARIES = {"claude", "hermes", "cursor-agent", "cursor", "opencode"}
 
 
 @pytest.fixture(autouse=True)
