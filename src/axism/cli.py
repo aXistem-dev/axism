@@ -371,9 +371,13 @@ def _live_session_count(
         live = live_for_session(live_map, s)
         if live is None:
             continue
-        if live.is_killable or (
-            live.kind == "background"
-            and live.state in {"working", "blocked", "running"}
+        if (
+            live.is_killable
+            or (
+                live.kind == "background"
+                and live.state in {"working", "blocked", "running"}
+            )
+            or provider.can_stop(live)
         ):
             n += 1
     return n

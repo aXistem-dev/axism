@@ -487,3 +487,42 @@ def test_tui_stop_unsupported_shows_failure_toast(tmp_path, monkeypatch):
     monkeypatch.setattr(OpenCodeProvider, "slash_stop", unsupported)
     toast = _run(_stop_via_keys(SessionManagerApp()))
     assert "Stop failed" in toast and "does not support" in toast
+
+
+def test_tui_delete_dialog_warns_service_running_opencode_session(tmp_path, monkeypatch):
+    _setup_opencode(tmp_path, monkeypatch)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            app.query_one("#sessions").focus()
+            await pilot.pause()
+            await pilot.press("d")
+            await pilot.pause()
+            assert isinstance(app.screen, ConfirmDeleteScreen)
+            warnings = list(app.screen.warnings)
+            await pilot.press("escape")
+            await pilot.pause()
+            return warnings
+
+    warnings = _run(main())
+    assert any(OC_SESSION[:8] in w and "will stop" in w for w in warnings)
+
+
+def test_tui_move_refuses_service_running_opencode_session(tmp_path, monkeypatch):
+    _setup_opencode(tmp_path, monkeypatch)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            app.query_one("#sessions").focus()
+            await pilot.pause()
+            await pilot.press("m")
+            await pilot.pause()
+            return type(app.screen).__name__, str(app.query_one("#toast").render())
+
+    screen, toast = _run(main())
+    assert screen != "MoveTargetScreen"
+    assert "stop them first" in toast

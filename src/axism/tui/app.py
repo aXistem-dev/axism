@@ -26,6 +26,7 @@ from axism.live import LiveSession
 from axism.move import MoveResult
 from axism.providers import (
     PROVIDER_LABELS,
+    SessionProvider,
     UnsupportedOperation,
     detect_undecided_providers,
     enabled_providers_from_settings,
@@ -414,22 +415,26 @@ def _summarize_project_delete(slugs: list[str], actions: list[str]) -> tuple[boo
     return True, f"Deleted {len(slugs)} projects"
 
 
-def _live_needs_stop(live: LiveSession | None) -> bool:
+def _live_needs_stop(
+    live: LiveSession | None, provider: SessionProvider | None = None
+) -> bool:
+    """Whether a delete stops ``live`` first (a process, or what the backend can stop)."""
     if live is None:
         return False
-    return live.is_killable
+    return live.is_killable or (provider is not None and provider.can_stop(live))
 
 
 def _format_session_delete_confirm(
     targets: list[SessionMeta],
     plans: list,
     preview: list[str],
+    provider: SessionProvider | None = None,
 ) -> tuple[str, list[str]]:
     """Return (body markup, warning lines) for the delete confirm dialog."""
     warnings: list[str] = []
     for s, plan in zip(targets, plans, strict=False):
         live = plan.live
-        if not _live_needs_stop(live):
+        if not _live_needs_stop(live, provider):
             continue
         pid = f" pid={live.pid}" if live.pid is not None else ""
         warnings.append(
@@ -449,7 +454,7 @@ def _format_session_delete_confirm(
         nfrag = len(plan.inventory.deletable)
         live = plan.live
         live_bit = ""
-        if _live_needs_stop(live):
+        if _live_needs_stop(live, provider):
             live_bit = f"  ·  live {live.kind}/{live.state}"
             if live.pid is not None:
                 live_bit += f" pid={live.pid}"
@@ -485,6 +490,7 @@ def _memory_line(n_projects: int, keep: bool) -> str:
 
 def _format_project_delete_confirm(
     projects: list[tuple[str, str, object, list[str]]],
+    provider: SessionProvider | None = None,
 ) -> tuple[str, list[str]]:
     """Format confirm body for one or more projects.
 
@@ -499,7 +505,7 @@ def _format_project_delete_confirm(
     for slug, cwd, plan, preview in projects:
         live_n = 0
         for sp in getattr(plan, "session_plans", []) or []:
-            if _live_needs_stop(sp.live):
+            if _live_needs_stop(sp.live, provider):
                 live_n += 1
                 live = sp.live
                 pid = f" pid={live.pid}" if live and live.pid is not None else ""
@@ -2644,9 +2650,13 @@ class SessionManagerApp(App[None]):
             live = live_for_session(self.live, s)
             if live is None:
                 continue
-            if live.is_killable or (
-                live.kind == "background"
-                and live.state in {"working", "blocked", "running"}
+            if (
+                live.is_killable
+                or (
+                    live.kind == "background"
+                    and live.state in {"working", "blocked", "running"}
+                )
+                or self._provider_for_session(s).can_stop(live)
             ):
                 live_n += 1
         if live_n:
@@ -3025,7 +3035,7 @@ class SessionManagerApp(App[None]):
                     plan, dry_run=True, force=True, stop_live=True
                 )
                 packed.append((p.slug, p.cwd_guess, plan, preview))
-            return _format_project_delete_confirm(packed)
+            return _format_project_delete_confirm(packed, provider)
 
         body, warnings = _build(False)
         screen_ref: list[ConfirmDeleteScreen] = []
@@ -3102,7 +3112,7 @@ class SessionManagerApp(App[None]):
             plans, dry_run=True, force=True, stop_live=True
         )
         body, warnings = _format_session_delete_confirm(
-            targets, plans, preview_actions
+            targets, plans, preview_actions, provider
         )
 
         def _after(confirmed: bool | None) -> None:

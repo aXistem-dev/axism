@@ -54,6 +54,21 @@ def prov(root: Path) -> OpenCodeProvider:
     return OpenCodeProvider(config_dir=root)
 
 
+def _record_all_providers(root: Path) -> None:
+    """Settings that record every backend, so the CLI detects nothing."""
+    save_settings(
+        Settings(
+            active_provider="opencode",
+            providers={
+                "claude_code": ProviderPrefs(enabled=False),
+                "cursor": ProviderPrefs(enabled=False),
+                "hermes": ProviderPrefs(enabled=False),
+                "opencode": ProviderPrefs(enabled=True, config_dir=str(root)),
+            },
+        )
+    )
+
+
 def _no_processes(monkeypatch, found=None):
     monkeypatch.setattr(
         "axism.providers.opencode.find_agent_sessions",
@@ -199,6 +214,7 @@ def test_slash_stop_delegates_to_stop(prov, monkeypatch):
 
 
 def test_cli_stop_uses_stop(prov, monkeypatch, capsys):
+    _record_all_providers(prov.config_root())
     live = LiveSession(A, "interactive", state="running", source="opencode-service")
     monkeypatch.setattr(OpenCodeProvider, "merge_live", lambda self, *a, **k: {A: live})
     called: list = []
@@ -564,3 +580,21 @@ def test_stop_interrupts_every_active_family_member(prov, monkeypatch):
     )
     ok, msg = prov.stop(A, prov.merge_live()[A])
     assert not ok and short_id(C) in msg and "stopped pid 99" in msg
+
+
+def test_cli_move_refuses_service_running_session_without_force(prov, monkeypatch, capsys):
+    _record_all_providers(prov.config_root())
+    live = LiveSession(A, "interactive", state="running", source="opencode-service")
+    monkeypatch.setattr(OpenCodeProvider, "merge_live", lambda self, *a, **k: {A: live})
+
+    def boom(*a, **k):
+        raise AssertionError("must not move")
+
+    monkeypatch.setattr(OpenCodeProvider, "move_sessions", boom)
+    monkeypatch.setattr(OpenCodeProvider, "move_projects", boom)
+    base = ["--provider", "opencode", "--config-dir", str(prov.config_root())]
+    for argv in (["move", A, "--to", DEST, *base], ["move", "p1", "--project", "--to", DEST, *base]):
+        with pytest.raises(SystemExit) as exc:
+            cli.main(argv)
+        assert exc.value.code == 2
+        assert "stop them first" in capsys.readouterr().err
