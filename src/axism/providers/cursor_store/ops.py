@@ -9,6 +9,7 @@ from pathlib import Path
 
 from axism.discover import ProjectInfo, SessionMeta
 from axism.move import MoveResult, normalize_dest_cwd
+from axism.paths import readable_or_absent
 from axism.providers.cursor_store.discover import locate_sessions, write_cli_meta_name
 from axism.providers.cursor_store.paths import (
     TITLE_SIDECAR,
@@ -66,6 +67,16 @@ def rename_session(root: Path, session_id: str, title: str) -> tuple[bool, str]:
     return True, f"renamed to '{clean}'"
 
 
+def _unreadable_store(root: Path, cwd: str, slug: str) -> bool:
+    """Whether any of a workspace's store folders exists but cannot be read."""
+    folders = [projects_dir(root) / slug, projects_dir(root) / slug / TRANSCRIPTS_DIRNAME]
+    if slug.startswith("chats-"):
+        folders.append(chats_dir(root) / slug.removeprefix("chats-"))
+    elif cwd:
+        folders.append(chats_dir(root) / cwd_bucket(cwd))
+    return not all(readable_or_absent(f) for f in folders)
+
+
 def _dest_dir_for(root: Path, directory: Path, dest_cwd: str) -> Path:
     if _is_agent_dir(directory):
         return projects_dir(root) / slugify_path(dest_cwd) / TRANSCRIPTS_DIRNAME
@@ -86,6 +97,8 @@ def move_sessions(
     if not dest_cwd:
         return MoveResult(False, f"invalid destination: {dest!r}")
     dest_slug = slugify_path(dest_cwd)
+    if _unreadable_store(root, dest_cwd, dest_slug):
+        return MoveResult(False, f"refused: destination folder unreadable: {dest_cwd}")
 
     actions: list[str] = []
     moved = 0
@@ -149,12 +162,19 @@ def move_projects(
     if not dest_cwd:
         return MoveResult(False, f"invalid destination: {dest!r}")
     dest_slug = slugify_path(dest_cwd)
+    if _unreadable_store(root, dest_cwd, dest_slug):
+        return MoveResult(False, f"refused: destination folder unreadable: {dest_cwd}")
 
     sources = [p for p in projects if p.slug != dest_slug]
     if not sources:
         return MoveResult(
             True, "already at destination", dest_cwd=dest_cwd, dest_slug=dest_slug
         )
+    for src in sources:
+        if src.unreadable or _unreadable_store(root, src.cwd_guess, src.slug):
+            return MoveResult(
+                False, f"refused: project folder unreadable: {src.cwd_guess}"
+            )
 
     dest_project = projects_dir(root) / dest_slug
     dest_bucket = chats_dir(root) / cwd_bucket(dest_cwd)

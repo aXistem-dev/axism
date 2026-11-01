@@ -516,7 +516,16 @@ def build_project_delete_plan(
             hard_blocked=True,
         )
 
-    info = discover_project(project_path)
+    try:
+        info = discover_project(project_path)
+    except OSError:
+        return ProjectDeletePlan(
+            slug=slug,
+            project_path=project_path,
+            blocked_reason=f"project folder unreadable: {slug_or_path}",
+            keep_memory=keep_memory,
+            hard_blocked=True,
+        )
     session_plans = [
         build_delete_plan(
             s.session_id,

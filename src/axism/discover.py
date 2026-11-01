@@ -12,6 +12,7 @@ from axism.paths import (
     config_root,
     decode_project_slug,
     is_session_uuid,
+    listable_dir,
     path_size,
     projects_dir,
 )
@@ -180,7 +181,7 @@ def discover_project(slug_dir: Path) -> ProjectInfo:
         cwd_guess=decode_project_slug(slug),
         path=slug_dir,
     )
-    if not slug_dir.is_dir():
+    if not listable_dir(slug_dir):
         return info
     for entry in sorted(slug_dir.iterdir()):
         if entry.is_file() and entry.suffix == ".jsonl" and is_session_uuid(entry.stem):
@@ -216,7 +217,7 @@ def discover_all(root: Path | None = None) -> list[ProjectInfo]:
     """Scan all project slugs under the config root."""
     root = root or config_root()
     pdir = projects_dir(root)
-    if not pdir.is_dir():
+    if not listable_dir(pdir):
         return []
     projects: list[ProjectInfo] = []
     for child in sorted(pdir.iterdir()):

@@ -16,6 +16,7 @@ from axism.paths import (
     encode_project_slug,
     is_session_uuid,
     projects_dir,
+    readable_or_absent,
     tmp_claude_roots,
 )
 
@@ -555,6 +556,8 @@ def move_sessions(
     if not resolved:
         return MoveResult(False, f"invalid destination: {dest!r}")
     dest_cwd, dest_slug, dest_path = resolved
+    if not readable_or_absent(dest_path):
+        return MoveResult(False, f"refused: destination folder unreadable: {dest_cwd}")
 
     to_move: list[SessionMeta] = []
     for s in sessions:
@@ -677,6 +680,8 @@ def move_projects(
     if not resolved:
         return MoveResult(False, f"invalid destination: {dest!r}")
     dest_cwd, dest_slug, dest_path = resolved
+    if not readable_or_absent(dest_path):
+        return MoveResult(False, f"refused: destination folder unreadable: {dest_cwd}")
 
     sources = [p for p in projects if p.slug != dest_slug]
     if not sources:
@@ -686,6 +691,11 @@ def move_projects(
             dest_cwd=dest_cwd,
             dest_slug=dest_slug,
         )
+    for src in sources:
+        if src.unreadable or not readable_or_absent(src.path):
+            return MoveResult(
+                False, f"refused: project folder unreadable: {src.cwd_guess}"
+            )
 
     if len(sources) == 1 and not dest_path.exists():
         src = sources[0]

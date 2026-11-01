@@ -490,8 +490,8 @@ def _format_session_delete_confirm(
     for s, plan in zip(targets, plans, strict=False):
         title = s.display_title.replace("\n", " ")[:44]
         nfrag = len(plan.inventory.deletable)
-        rows = plan.inventory.stored_rows_bytes
-        total += rows if rows is not None and not nfrag else plan.inventory.total_bytes
+        size = plan.inventory.total_bytes + (plan.inventory.stored_rows_bytes or 0)
+        total += size
         live = plan.live
         live_bit = ""
         if _live_needs_stop(live, provider):
@@ -499,11 +499,7 @@ def _format_session_delete_confirm(
             if live.pid is not None:
                 live_bit += f" pid={live.pid}"
         stored = plan.inventory.stored_rows_note(_fmt_size)
-        size_bit = (
-            stored
-            if stored is not None and not nfrag
-            else _fmt_size(plan.inventory.total_bytes)
-        )
+        size_bit = stored if stored is not None and not nfrag else _fmt_size(size)
         lines.append(
             Content(
                 f"  {s.session_id[:8]}…  {size_bit}"
@@ -2417,7 +2413,12 @@ class SessionManagerApp(App[None]):
                     if not confirmed:
                         self._show_toast("Move cancelled", success=False, seconds=2)
                         return
-                    result = provider.move_projects(targets, dest)
+                    try:
+                        result = provider.move_projects(targets, dest)
+                    except OSError as exc:
+                        self.action_refresh()
+                        self._show_toast(f"Move failed: {exc}", success=False, seconds=5)
+                        return
                     self.selected_project_slugs.clear()
                     self.action_refresh()
                     self._show_toast(result.message, success=result.ok, seconds=4)
@@ -2522,16 +2523,19 @@ class SessionManagerApp(App[None]):
                     if not confirmed:
                         self._show_toast("Move cancelled", success=False, seconds=2)
                         return
-                    if is_cross:
-                        result = transfer_sessions(
-                            provider, dest_provider, sessions, dest
-                        )
-                        msg = result.message
-                        ok = result.ok
-                    else:
-                        result_m = provider.move_sessions(sessions, dest)
-                        msg = result_m.message
-                        ok = result_m.ok
+                    try:
+                        if is_cross:
+                            result = transfer_sessions(
+                                provider, dest_provider, sessions, dest
+                            )
+                            msg = result.message
+                            ok = result.ok
+                        else:
+                            result_m = provider.move_sessions(sessions, dest)
+                            msg = result_m.message
+                            ok = result_m.ok
+                    except OSError as exc:
+                        msg, ok = f"Move failed: {exc}", False
                     self.selected_session_ids.clear()
                     self.action_refresh()
                     self._show_toast(msg, success=ok, seconds=5)

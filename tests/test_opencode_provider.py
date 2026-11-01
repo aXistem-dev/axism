@@ -790,3 +790,20 @@ def test_delete_dialog_total_counts_the_stored_size(prov, monkeypatch):
     body, _ = _format_session_delete_confirm([sess], [plan], [], prov)
     text = str(body)
     assert f"Total  {fmt_size(3 * 1024)} across 1 session(s)" in text, text
+
+
+def test_delete_dialog_total_adds_stored_rows_to_files(tmp_path):
+    from types import SimpleNamespace
+
+    from axism.fragments import Fragment, FragmentInventory
+    from axism.tui.app import _format_session_delete_confirm
+    from axism.tui.details_view import fmt_size
+
+    inv = FragmentInventory("s1", None, [
+        Fragment("session_rows", tmp_path / "state.db", 2048),
+        Fragment("legacy_json", tmp_path / "sessions" / "s1.json", 1024),
+    ])
+    plan = SimpleNamespace(inventory=inv, live=None)
+    sess = SimpleNamespace(session_id="s1" * 8, display_title="T")
+    body, _ = _format_session_delete_confirm([sess], [plan], [], None)
+    assert f"Total  {fmt_size(3072)} across 1 session(s)" in str(body), str(body)

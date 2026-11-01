@@ -2,14 +2,43 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import re
+import stat
 from pathlib import Path
 
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE,
 )
+
+
+def listable_dir(path: Path) -> bool:
+    """Whether ``path`` is a folder whose contents can be listed.
+
+    ``False`` when it does not exist or is not a folder. A folder that exists
+    but cannot be read raises ``PermissionError``, on every Python version
+    (``Path.is_dir`` hides that error on newer ones).
+    """
+    try:
+        st = os.stat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    if not stat.S_ISDIR(st.st_mode):
+        return False
+    if not os.access(path, os.R_OK | os.X_OK):
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(path))
+    return True
+
+
+def readable_or_absent(path: Path) -> bool:
+    """``False`` when ``path`` exists but its folder contents cannot be read."""
+    try:
+        listable_dir(path)
+    except OSError:
+        return False
+    return True
 
 
 def config_root() -> Path:

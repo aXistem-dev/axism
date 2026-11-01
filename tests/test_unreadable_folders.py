@@ -291,3 +291,140 @@ def test_an_unreadable_claude_project_is_never_moved_or_deleted(tmp_path, monkey
     finally:
         gate.chmod(0o700)
     assert gate.is_dir()
+
+
+def _cursor_workspace(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+    """(root, workspace, transcripts dir, CLI chat bucket) with a chat in each store."""
+    from axism.providers.cursor_store.paths import cwd_bucket, slugify_path
+    from tests.test_cursor_provider import _write_cli_chat, _write_transcript
+
+    workspace = tmp_path / "work" / "demo"
+    workspace.mkdir(parents=True)
+    root = tmp_path / "cursor"
+    transcripts = root / "projects" / slugify_path(workspace) / "agent-transcripts"
+    _write_transcript(transcripts / "aaaaaaaa-0000-4000-8000-000000000001",
+                      "aaaaaaaa-0000-4000-8000-000000000001", "hi")
+    bucket = root / "chats" / cwd_bucket(workspace)
+    _write_cli_chat(bucket / "bbbbbbbb-0000-4000-8000-000000000002", "CLI chat")
+    return root, workspace, transcripts, bucket
+
+
+@pytest.mark.parametrize("half", ["transcripts", "bucket"])
+def test_a_half_unreadable_cursor_workspace_is_skipped_whole_and_never_moved(half, tmp_path):
+    from axism.discover import ProjectInfo
+    from axism.providers.cursor import CursorProvider
+    from axism.providers.cursor_store.paths import slugify_path
+
+    root, workspace, transcripts, bucket = _cursor_workspace(tmp_path)
+    gate = transcripts if half == "transcripts" else bucket
+    prov = CursorProvider(config_dir=root)
+    slug = slugify_path(workspace)
+    gate.chmod(0)
+    try:
+        found = [p for p in prov.discover() if p.slug == slug]
+        assert len(found) == 1 and found[0].unreadable and not found[0].sessions
+        # Even handed a project that looks readable, the move refuses.
+        looks_ok = ProjectInfo(slug=slug, cwd_guess=str(workspace), path=root / "projects" / slug)
+        result = prov.move_projects([looks_ok], str(tmp_path / "elsewhere"))
+    finally:
+        gate.chmod(0o700)
+    assert not result.ok
+    assert "unreadable" in result.message, result.message
+    assert gate.is_dir()
+
+
+def test_sessions_are_never_moved_into_an_unreadable_claude_project(tmp_path):
+    from axism.providers.claude_code import ClaudeCodeProvider
+
+    root = build_fake_config(tmp_path / "claude")
+    locked = root / "projects" / "-home-alice-src-locked"
+    locked.mkdir()
+    prov = ClaudeCodeProvider(config_dir=root)
+    sessions = [s for p in prov.discover() for s in p.sessions]
+    before = [s.transcript_path for s in sessions]
+    locked.chmod(0)
+    try:
+        result = prov.move_sessions(sessions[:1], "/home/alice/src/locked")
+    finally:
+        locked.chmod(0o700)
+    assert not result.ok
+    assert "destination folder unreadable" in result.message, result.message
+    assert before[0].is_file()
+
+
+def test_sessions_are_never_moved_into_an_unreadable_cursor_workspace(tmp_path):
+    from axism.providers.cursor import CursorProvider
+    from axism.providers.cursor_store.paths import slugify_path
+
+    root, _workspace, transcripts, _bucket = _cursor_workspace(tmp_path)
+    other = tmp_path / "work" / "locked"
+    other.mkdir()
+    dest_dir = root / "projects" / slugify_path(other)
+    (dest_dir / "agent-transcripts").mkdir(parents=True)
+    prov = CursorProvider(config_dir=root)
+    sessions = [s for p in prov.discover() for s in p.sessions]
+    dest_dir.chmod(0)
+    try:
+        result = prov.move_sessions(sessions, str(other))
+    finally:
+        dest_dir.chmod(0o700)
+    assert not result.ok
+    assert "destination folder unreadable" in result.message, result.message
+    assert any(transcripts.iterdir())
+
+
+def test_unreadable_folders_are_noted_where_is_dir_hides_permission_errors(
+    tmp_path, monkeypatch, capsys
+):
+    """Newer Pythons answer ``is_dir()`` False on EACCES instead of raising."""
+    import pathlib
+
+    real = pathlib.Path.is_dir
+
+    def quiet_is_dir(self, *args, **kwargs):
+        try:
+            return real(self, *args, **kwargs)
+        except OSError:
+            return False
+
+    monkeypatch.setattr(pathlib.Path, "is_dir", quiet_is_dir)
+    monkeypatch.setenv("AXISM_CONFIG_DIR", str(tmp_path / "axcfg"))
+    for case in ("cursor_project", "cursor_root", "claude_project"):
+        pid, root, gate = _locked_case(tmp_path / case, case)
+        _settings(tmp_path, {pid: root})
+        gate.chmod(0)
+        try:
+            _run(["list"])
+        finally:
+            gate.chmod(0o700)
+        assert _has_note(pid, capsys.readouterr().err), case
+
+
+def test_claude_delete_project_blocks_an_unreadable_project(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("AXISM_CONFIG_DIR", str(tmp_path / "axcfg"))
+    pid, root, gate = _locked_case(tmp_path, "claude_project")
+    _settings(tmp_path, {pid: root})
+    gate.chmod(0)
+    try:
+        rc = _run(["--provider", pid, "--config-dir", str(root),
+                   "delete-project", "--yes", "/home/alice/src/demo"])
+    finally:
+        gate.chmod(0o700)
+    assert rc == 2
+    assert "project folder unreadable" in capsys.readouterr().err
+    assert gate.is_dir()
+
+
+def test_list_exit_code_ignores_a_failed_live_lookup(tmp_path, monkeypatch, capsys):
+    from axism.providers.claude_code import ClaudeCodeProvider
+
+    monkeypatch.setenv("AXISM_CONFIG_DIR", str(tmp_path / "axcfg"))
+    root = build_fake_config(tmp_path / "claude")
+    _settings(tmp_path, {"claude_code": root})
+
+    def boom(self, *a, **k):
+        raise PermissionError(13, "Permission denied", str(root))
+
+    monkeypatch.setattr(ClaudeCodeProvider, "merge_live", boom)
+    assert _run(["list"]) == 0
+    assert _run(["--provider", "claude_code", "--config-dir", str(root), "list"]) == 0

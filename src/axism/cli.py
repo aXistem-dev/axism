@@ -78,6 +78,7 @@ def cmd_list(args: argparse.Namespace) -> int:
         except OSError:
             projects = []
             skipped.append(provider.label)
+        unread = set(skipped)
         for p in projects:
             p.provider = provider.name
             for s in p.sessions:
@@ -95,13 +96,14 @@ def cmd_list(args: argparse.Namespace) -> int:
     else:
         providers = enabled_providers_from_settings(_settings(args))
         projects = federate_discover(providers, skipped=skipped)
+        unread = set(skipped)
         live_map = federate_merge_live(providers, use_cli=use_cli, skipped=skipped)
         root = " · ".join(str(p.config_root()) for p in providers)
         providers_note = ", ".join(p.label for p in providers)
     if skipped:
         print(skipped_note(skipped), file=sys.stderr)
     # An empty listing is not an error; an agent that cannot be read at all is.
-    rc = 1 if providers and all(p.label in skipped for p in providers) else 0
+    rc = 1 if providers and all(p.label in unread for p in providers) else 0
 
     if args.project:
         projects = filter_projects_by_cwd(projects, args.project)

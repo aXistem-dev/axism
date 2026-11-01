@@ -9,7 +9,7 @@ from pathlib import Path
 
 from axism.discover import ProjectInfo, SessionMeta
 from axism.fragments import is_safe_id
-from axism.paths import path_size
+from axism.paths import listable_dir, path_size
 from axism.providers.cursor_store.paths import (
     NON_PROJECT_DIRS,
     TITLE_SIDECAR,
@@ -245,14 +245,14 @@ def discover_all(root: Path) -> list[ProjectInfo]:
         existing.entrypoint = KIND_BOTH
 
     pdir = projects_dir(root)
-    if pdir.is_dir():
+    if listable_dir(pdir):
         for child in sorted(pdir.iterdir()):
             if not child.is_dir() or child.name in NON_PROJECT_DIRS:
                 continue
             cwd = decode_slug(child.name)
             transcripts = child / TRANSCRIPTS_DIRNAME
             try:
-                if not transcripts.is_dir():
+                if not listable_dir(child) or not listable_dir(transcripts):
                     continue
                 convs = sorted(transcripts.iterdir())
             except OSError:
@@ -267,7 +267,7 @@ def discover_all(root: Path) -> list[ProjectInfo]:
                     add(info, session)
 
     cdir = chats_dir(root)
-    if cdir.is_dir():
+    if listable_dir(cdir):
         known = bucket_to_cwd(root)
         for bucket in sorted(cdir.iterdir()):
             if not bucket.is_dir():
@@ -281,6 +281,7 @@ def discover_all(root: Path) -> list[ProjectInfo]:
                 where, folder = f"(unknown workspace {bucket.name})", bucket
                 cwd = ""
             try:
+                listable_dir(bucket)
                 chats = sorted(bucket.iterdir())
             except OSError:
                 unreadable.append(ProjectInfo(slug, where, folder, unreadable=True))
@@ -299,7 +300,14 @@ def discover_all(root: Path) -> list[ProjectInfo]:
     ordered.sort(
         key=lambda p: max((s.mtime for s in p.sessions), default=0), reverse=True
     )
-    return [p for p in ordered if p.sessions] + unreadable
+    # A workspace with an unreadable store is skipped whole: listing (or
+    # moving) only its readable half would act on the half we cannot see.
+    blocked: dict[str, ProjectInfo] = {}
+    for info in unreadable:
+        blocked.setdefault(info.slug, info)
+    return [p for p in ordered if p.sessions and p.slug not in blocked] + list(
+        blocked.values()
+    )
 
 
 def _is_dir(path: Path) -> bool:
