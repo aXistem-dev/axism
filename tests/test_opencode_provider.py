@@ -776,3 +776,17 @@ def test_print_only_pastes_correctly_with_spaces_in_the_data_folder(
     assert shlex.split(first) == [
         "env", "XDG_DATA_HOME=/tmp/my data", "opencode", "--session", A
     ]
+
+
+def test_delete_dialog_total_counts_the_stored_size(prov, monkeypatch):
+    from axism.tui.app import _format_session_delete_confirm
+    from axism.tui.details_view import fmt_size
+
+    monkeypatch.setattr(prov, "merge_live", lambda *a, **k: {})
+    plan = prov.plan_delete(A)
+    rows = plan.inventory.fragments[0]
+    rows.size_bytes = 3 * 1024
+    sess = prov.find_session(A)[1]
+    body, _ = _format_session_delete_confirm([sess], [plan], [], prov)
+    text = str(body)
+    assert f"Total  {fmt_size(3 * 1024)} across 1 session(s)" in text, text

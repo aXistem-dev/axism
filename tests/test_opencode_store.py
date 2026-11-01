@@ -333,7 +333,9 @@ def test_provider_entry_points_survive_an_unreadable_data_folder(tmp_path):
         if os.access(parent, os.R_OK | os.X_OK):
             pytest.skip("permissions are not enforced here (running as root)")
         prov = OpenCodeProvider(config_dir=root)
-        assert prov.discover() == []
+        # Like the other agents: the caller skips it with a note.
+        with pytest.raises(PermissionError):
+            prov.discover()
         assert prov.merge_live(use_cli=False) == {}
         assert isinstance(prov.status_note(), str)
         assert prov.detect() in {True, False}

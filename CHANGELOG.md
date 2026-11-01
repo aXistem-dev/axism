@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- One unreadable project folder (Claude Code, Cursor) is skipped on its own with a note naming it, instead of hiding the whole agent; `move --project` and `delete-project` refuse it and never move or remove it
+- An unreadable OpenCode data folder gets the same `OpenCode: folder unreadable — skipped` note as the other agents, and an unreadable `opencode.db` reads `database unreadable` in `axism providers` instead of an unsupported layout
+- `resume`, `move`, `delete` and other commands that hit an unreadable folder print `axism: …` and exit 1 instead of a traceback
+- `list` exits 0 when there is nothing to list (also with `--provider`); it exits 1 only when no requested agent could be read
+- The delete dialog's Total counts the stored size of database-backed sessions (OpenCode, Hermes) instead of `0B`
+
 ## [0.2.1] — 2026-10-28
 
 Polish and fixes, no new features.

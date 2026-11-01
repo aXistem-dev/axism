@@ -488,9 +488,10 @@ def _format_session_delete_confirm(
     ]
     total = 0
     for s, plan in zip(targets, plans, strict=False):
-        total += plan.inventory.total_bytes
         title = s.display_title.replace("\n", " ")[:44]
         nfrag = len(plan.inventory.deletable)
+        rows = plan.inventory.stored_rows_bytes
+        total += rows if rows is not None and not nfrag else plan.inventory.total_bytes
         live = plan.live
         live_bit = ""
         if _live_needs_stop(live, provider):

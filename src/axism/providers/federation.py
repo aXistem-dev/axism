@@ -131,6 +131,23 @@ def _skip(skipped: list[str] | None, provider: SessionProvider) -> None:
         skipped.append(provider.label)
 
 
+def drop_unreadable(
+    provider: SessionProvider,
+    projects: list[ProjectInfo],
+    skipped: list[str] | None,
+) -> list[ProjectInfo]:
+    """``projects`` without those whose folder could not be read; each is noted."""
+    kept: list[ProjectInfo] = []
+    for project in projects:
+        if not project.unreadable:
+            kept.append(project)
+            continue
+        entry = f"{provider.label} project {project.cwd_guess}"
+        if skipped is not None and entry not in skipped:
+            skipped.append(entry)
+    return kept
+
+
 def skipped_note(skipped: list[str]) -> str:
     """One line naming each agent whose folder could not be read (plain text)."""
     return "; ".join(f"{label}: {UNREADABLE_SKIPPED}" for label in skipped)
@@ -142,7 +159,8 @@ def federate_discover(
     """Discover all projects from ``providers``, tagged and sorted by recency.
 
     A provider whose folder cannot be read (``OSError``) is left out and its
-    label appended to ``skipped``.
+    label appended to ``skipped``; a single unreadable project is left out
+    and noted as ``<label> project <folder>``.
     """
     projects: list[ProjectInfo] = []
     for provider in providers:
@@ -151,6 +169,7 @@ def federate_discover(
         except OSError:
             _skip(skipped, provider)
             continue
+        found = drop_unreadable(provider, found, skipped)
         tag_provider(found, provider.name)
         projects.extend(found)
     projects.sort(

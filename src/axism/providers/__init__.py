@@ -15,6 +15,7 @@ from axism.providers.claude_code import ClaudeCodeProvider, default_provider
 from axism.providers.federation import (
     DetectionResult,
     detect_undecided_providers,
+    drop_unreadable,
     enabled_providers_from_settings,
     federate_discover,
     federate_merge_live,
@@ -47,6 +48,7 @@ __all__ = [
     "default_refusal",
     "detect_undecided_providers",
     "disable_refusal",
+    "drop_unreadable",
     "enabled_providers_from_settings",
     "federate_discover",
     "federate_merge_live",

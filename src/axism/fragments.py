@@ -91,6 +91,15 @@ class FragmentInventory:
     def deletable(self) -> list[Fragment]:
         return [f for f in self.fragments if not f.is_protected()]
 
+    @property
+    def stored_rows_bytes(self) -> int | None:
+        """Size of the session's rows in a database-backed agent, else ``None``."""
+        rows = next(
+            (f for f in self.fragments if f.kind == "session_rows" and f.is_protected()),
+            None,
+        )
+        return None if rows is None else rows.size_bytes
+
     def stored_rows_note(self, size_text: Callable[[int], str] | None = None) -> str | None:
         """For database-backed agents: where the session's size sits.
 

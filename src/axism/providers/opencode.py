@@ -6,6 +6,7 @@ OpenCode's own server. The background service is never started or stopped.
 
 from __future__ import annotations
 
+import errno
 import os
 from pathlib import Path
 
@@ -100,7 +101,11 @@ class OpenCodeProvider(ProviderBase):
         if status == "missing":
             return "database not found"
         if status == "unreadable":
-            return "data folder unreadable"
+            try:
+                db_found = db_path(root).is_file()
+            except OSError:
+                db_found = False
+            return "database unreadable" if db_found else "data folder unreadable"
         if status == "unsupported":
             return _UNSUPPORTED_LAYOUT
         try:
@@ -112,7 +117,10 @@ class OpenCodeProvider(ProviderBase):
     # -- discovery / live --------------------------------------------------
 
     def discover(self, root: Path | None = None) -> list[ProjectInfo]:
-        return oc_discover.discover_all(root or self.config_root())
+        root = root or self.config_root()
+        if oc_discover.layout_status(root) == "unreadable":
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(root))
+        return oc_discover.discover_all(root)
 
     def merge_live(
         self, root: Path | None = None, *, use_cli: bool = True

@@ -20,6 +20,7 @@ from axism.providers import (
     default_refusal,
     detect_undecided_providers,
     disable_refusal,
+    drop_unreadable,
     enabled_providers_from_settings,
     federate_discover,
     federate_merge_live,
@@ -71,8 +72,9 @@ def cmd_list(args: argparse.Namespace) -> int:
     if getattr(args, "provider", None) or getattr(args, "config_dir", None):
         provider = _provider(args)
         root = provider.config_root()
+        providers = [provider]
         try:
-            projects = provider.discover()
+            projects = drop_unreadable(provider, provider.discover(), skipped)
         except OSError:
             projects = []
             skipped.append(provider.label)
@@ -98,6 +100,8 @@ def cmd_list(args: argparse.Namespace) -> int:
         providers_note = ", ".join(p.label for p in providers)
     if skipped:
         print(skipped_note(skipped), file=sys.stderr)
+    # An empty listing is not an error; an agent that cannot be read at all is.
+    rc = 1 if providers and all(p.label in skipped for p in providers) else 0
 
     if args.project:
         projects = filter_projects_by_cwd(projects, args.project)
@@ -129,7 +133,7 @@ def cmd_list(args: argparse.Namespace) -> int:
                     }
                 )
         print(json.dumps(payload, indent=2))
-        return 0
+        return rc
 
     print(f"# providers: {providers_note}")
     for p in projects:
@@ -159,8 +163,7 @@ def cmd_list(args: argparse.Namespace) -> int:
             )
     if not projects:
         print(f"No projects found under {root}", file=sys.stderr)
-        return 1
-    return 0
+    return rc
 
 
 def cmd_show(args: argparse.Namespace) -> int:
@@ -432,6 +435,9 @@ def cmd_move(args: argparse.Namespace) -> int:
                 p = by_slug.get(slug)
             if not p:
                 print(f"Project not found: {key}", file=sys.stderr)
+                return 1
+            if p.unreadable:
+                print(f"Refused: project folder unreadable: {key}", file=sys.stderr)
                 return 1
             targets.append(p)
         if _refuse_live_move(provider, [s for p in targets for s in p.sessions], args):
@@ -919,6 +925,9 @@ def main(argv: list[str] | None = None) -> None:
     except UnsupportedOperation as exc:
         print(f"axism: {exc}", file=sys.stderr)
         raise SystemExit(2) from None
+    except OSError as exc:
+        print(f"axism: {exc}", file=sys.stderr)
+        raise SystemExit(1) from None
     except AmbiguousSessionId as exc:
         print(f"axism: {exc}:", file=sys.stderr)
         for sid in exc.matches[:10]:

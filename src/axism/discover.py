@@ -57,6 +57,8 @@ class ProjectInfo:
     path: Path
     sessions: list[SessionMeta] = field(default_factory=list)
     provider: str | None = None
+    # The project's folder could not be read; it carries no sessions.
+    unreadable: bool = False
 
     @property
     def session_count(self) -> int:
@@ -219,7 +221,15 @@ def discover_all(root: Path | None = None) -> list[ProjectInfo]:
     projects: list[ProjectInfo] = []
     for child in sorted(pdir.iterdir()):
         if child.is_dir() and child.name != "memory":
-            proj = discover_project(child)
+            try:
+                proj = discover_project(child)
+            except OSError:
+                proj = ProjectInfo(
+                    slug=child.name,
+                    cwd_guess=decode_project_slug(child.name),
+                    path=child,
+                    unreadable=True,
+                )
             # Include empty project dirs so they can be cleaned up
             projects.append(proj)
     projects.sort(key=lambda p: max((s.mtime for s in p.sessions), default=0), reverse=True)

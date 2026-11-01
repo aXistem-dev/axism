@@ -221,6 +221,7 @@ def discover_all(root: Path) -> list[ProjectInfo]:
     """
     projects: dict[str, ProjectInfo] = {}
     by_id: dict[tuple[str, str], SessionMeta] = {}
+    unreadable: list[ProjectInfo] = []
 
     def bucket_for(slug: str, cwd: str, path: Path) -> ProjectInfo:
         info = projects.get(slug)
@@ -248,12 +249,17 @@ def discover_all(root: Path) -> list[ProjectInfo]:
         for child in sorted(pdir.iterdir()):
             if not child.is_dir() or child.name in NON_PROJECT_DIRS:
                 continue
-            transcripts = child / TRANSCRIPTS_DIRNAME
-            if not transcripts.is_dir():
-                continue
             cwd = decode_slug(child.name)
+            transcripts = child / TRANSCRIPTS_DIRNAME
+            try:
+                if not transcripts.is_dir():
+                    continue
+                convs = sorted(transcripts.iterdir())
+            except OSError:
+                unreadable.append(ProjectInfo(child.name, cwd, child, unreadable=True))
+                continue
             info = bucket_for(child.name, cwd, child)
-            for conv in sorted(transcripts.iterdir()):
+            for conv in convs:
                 if not conv.is_dir():
                     continue
                 session = _agent_session(conv, child.name, cwd)
@@ -269,12 +275,18 @@ def discover_all(root: Path) -> list[ProjectInfo]:
             cwd = known.get(bucket.name)
             if cwd:
                 slug = slugify_path(cwd)
-                info = bucket_for(slug, cwd, projects_dir(root) / slug)
+                where, folder = cwd, projects_dir(root) / slug
             else:
                 slug = f"chats-{bucket.name}"
-                info = bucket_for(slug, f"(unknown workspace {bucket.name})", bucket)
+                where, folder = f"(unknown workspace {bucket.name})", bucket
                 cwd = ""
-            for chat in sorted(bucket.iterdir()):
+            try:
+                chats = sorted(bucket.iterdir())
+            except OSError:
+                unreadable.append(ProjectInfo(slug, where, folder, unreadable=True))
+                continue
+            info = bucket_for(slug, where, folder)
+            for chat in chats:
                 if not chat.is_dir() or not is_chat_id(chat.name):
                     continue
                 session = _cli_session(chat, info.slug, cwd)
@@ -287,7 +299,15 @@ def discover_all(root: Path) -> list[ProjectInfo]:
     ordered.sort(
         key=lambda p: max((s.mtime for s in p.sessions), default=0), reverse=True
     )
-    return [p for p in ordered if p.sessions]
+    return [p for p in ordered if p.sessions] + unreadable
+
+
+def _is_dir(path: Path) -> bool:
+    """``is_dir`` that treats a folder it cannot look into as absent."""
+    try:
+        return path.is_dir()
+    except OSError:
+        return False
 
 
 def locate_sessions(root: Path, session_id: str) -> list[Path]:
@@ -299,13 +319,13 @@ def locate_sessions(root: Path, session_id: str) -> list[Path]:
     if pdir.is_dir():
         for child in pdir.iterdir():
             conv = child / TRANSCRIPTS_DIRNAME / session_id
-            if conv.is_dir():
+            if _is_dir(conv):
                 found.append(conv)
     cdir = chats_dir(root)
     if cdir.is_dir():
         for bucket in cdir.iterdir():
             chat = bucket / session_id
-            if chat.is_dir():
+            if _is_dir(chat):
                 found.append(chat)
     return found
 

@@ -40,7 +40,7 @@ def _columns(con: sqlite3.Connection, table: str) -> set[str]:
 
 
 def layout_status(root: Path) -> str:
-    """``missing`` (no DB), ``unreadable`` (data folder cannot be read),
+    """``missing`` (no DB), ``unreadable`` (data folder or DB cannot be read),
     ``unsupported`` (not an OpenCode 2 database), or ``ok``."""
     db = db_path(root)
     try:
@@ -48,6 +48,8 @@ def layout_status(root: Path) -> str:
             # Absent only if the folder can be read; otherwise we cannot tell.
             readable = os.access(root, os.R_OK | os.X_OK) or not root.exists()
             return "missing" if readable else "unreadable"
+        if not os.access(db, os.R_OK):
+            return "unreadable"
     except OSError:
         return "unreadable"
     try:

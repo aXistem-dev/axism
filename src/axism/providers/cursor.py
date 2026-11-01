@@ -249,6 +249,13 @@ class CursorProvider(ProviderBase):
             )
 
         project_path = projects_dir(root) / project.slug
+        if project.unreadable:
+            return ProjectDeletePlan(
+                slug=project.slug,
+                project_path=project_path,
+                blocked_reason=f"project folder unreadable: {slug_or_path}",
+                hard_blocked=True,
+            )
         if project_path.is_symlink():
             return ProjectDeletePlan(
                 slug=project.slug,
