@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-11-01
+
+Unreadable folders handled safely everywhere, no new features.
+
 ### Fixed
 
 - One unreadable project folder (Claude Code, Cursor) is skipped on its own with a note naming it, instead of hiding the whole agent; a Cursor workspace whose agent transcripts or CLI chats cannot be read is skipped whole. Moves and `delete-project` refuse an unreadable project, and moves refuse an unreadable destination, so neither is ever moved, removed or written into
