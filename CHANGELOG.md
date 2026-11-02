@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] — 2026-11-02
+
+A layout tuned from small windows to full-screen 4K, every session tag in view, and the same behaviour whether aXism is installed with pipx or uv.
+
+### Changed
+
+- From 280 columns (a full-screen window on a 4K display) the details pane takes half the width: projects 20%, sessions 30%, details 50%; narrower windows keep 20% / 40% / 40%
+- The details pane hides below 110 columns (was 70) and projects and sessions split one third / two thirds; `Enter` on a session then opens the reader directly
+- The Tags column grows to fit the longest tags in the list and uses short forms (`int`, `bg`, `rc`, `sub:N`, `live` only when no state is shown), so every tag of a session is visible; the filter still matches the full words
+- Project names keep the whole folder name when `…/` does not fit, and the home folder shows as `~`
+- Sizes in the lists use a compact form (`7.8MB`, `71MB`, `358KB`) that always fits its column
+- `scripts/install.sh` installs with pipx first, then uv, then pip, and points out an older axism left behind by uv that could shadow the new one; the README lists pipx first
+
+### Fixed
+
+- On Python 3.14 (the version `uv tool install` picks by default) an unreadable Hermes or OpenCode folder looked empty or missing; it is now skipped with the `folder unreadable` note as on 3.12 and 3.13, and `axism providers` reports it as unreadable
+- CI runs the tests on Python 3.12, 3.13 and 3.14
+
 ## [0.2.2] — 2026-11-01
 
 Unreadable folders handled safely everywhere, no new features.

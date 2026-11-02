@@ -84,7 +84,9 @@ Capital letters do the same as lowercase, except `G` (last row) and `T` (next th
 
 The details pane shows the session's facts first, then its last prompt and last reply. `Enter` on the details pane opens the reader with the full conversation (text turns only); `Esc` or `q` returns. Dialogs fit small terminals and scroll when the text is longer than the window.
 
-Terminals narrower than 70 columns hide the details pane so projects and sessions both fit. Keys act on the pane you are in. For example, `d` in the projects pane deletes whole projects, while `d` in the sessions pane deletes sessions. If items are marked, the action applies to all of them. If an agent cannot do something, aXism tells you instead of doing half the job.
+The panes fill the window by proportion: projects 20%, sessions 40%, details 40%, and from 280 columns (a full-screen window on a 4K display) the details pane takes half. Terminals narrower than 110 columns hide the details pane so projects and sessions both fit; `Enter` on a session then opens the reader directly. The sessions list tags each session in short form: `int` (interactive) or `bg` (background), its state such as `busy` or `idle` (or `live`), `rc` (remote control) and `sub:N` (sub-agents); the filter also matches the full words.
+
+Keys act on the pane you are in. For example, `d` in the projects pane deletes whole projects, while `d` in the sessions pane deletes sessions. If items are marked, the action applies to all of them. If an agent cannot do something, aXism tells you instead of doing half the job.
 
 **Moving.** Press `m`, then pick an existing project or type a folder path. Within the same agent, aXism moves the session files and updates their recorded paths. It creates the destination folder if needed, but it never moves your source code. Stop running sessions before moving them. Moving a session into another agent's project copies the conversation text and keeps the original.
 
