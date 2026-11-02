@@ -25,14 +25,14 @@ aXism, a tool by aXistem, is a terminal app plus a command-line tool. It finds e
 Needs Python 3.12 or newer.
 
 ```bash
-uv tool install axism
-# or
 pipx install axism
+# or
+uv tool install axism
 ```
 
 Make sure `~/.local/bin` is on your `PATH`, then check it works with `axism --version`.
 
-To upgrade, run `uv tool upgrade axism` or `pipx upgrade axism`. If the version does not change, the tool was installed from a pinned file instead of PyPI; reinstall with `uv tool install --force axism`.
+To upgrade, run `pipx upgrade axism` or `uv tool upgrade axism`. If the version does not change, the tool was installed from a pinned file instead of PyPI; reinstall with `pipx install --force axism` (or `uv tool install --force axism`). Install with one tool only: two copies compete for the same `axism` command.
 
 ## First steps
 

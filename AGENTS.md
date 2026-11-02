@@ -80,7 +80,7 @@ uv run pytest
 uv run ruff check src tests
 python3 scripts/check_anonymity.py
 uv run axism --help
-uv tool install --force .
+./scripts/install.sh   # local install as the axism command (pipx, else uv)
 ```
 
 ## Contributing

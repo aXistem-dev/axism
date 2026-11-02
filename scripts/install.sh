@@ -27,10 +27,17 @@ restore_build_info() {
 }
 trap restore_build_info EXIT
 
-if command -v uv >/dev/null 2>&1; then
-  uv tool install --force .
-elif command -v pipx >/dev/null 2>&1; then
+# pipx first, then uv, then pip. Two installs of axism compete for the same
+# command, so point out a copy left behind by the other tool.
+if command -v pipx >/dev/null 2>&1; then
   pipx install --force .
+  if command -v uv >/dev/null 2>&1 && uv tool list 2>/dev/null | grep -q '^axism '; then
+    echo
+    echo "Note: an older axism installed with uv is still present."
+    echo "Remove it so it cannot shadow this one: uv tool uninstall axism"
+  fi
+elif command -v uv >/dev/null 2>&1; then
+  uv tool install --force .
 else
   python3 -m pip install --user --upgrade .
 fi
