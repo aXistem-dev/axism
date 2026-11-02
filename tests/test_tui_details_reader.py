@@ -26,7 +26,7 @@ CWD = "/home/alice/src/demo"
 SLUG = "-home-alice-src-demo"
 SID_A = "aaaaaaaa-0000-0000-0000-000000000001"
 SID_B = "aaaaaaaa-0000-0000-0000-000000000002"
-SIZES = [(80, 24), (120, 40)]
+SIZES = [(110, 30), (120, 40)]
 
 
 def _run(coro):
@@ -313,7 +313,7 @@ def test_details_unreadable_transcript_note(tmp_path, monkeypatch):
 
     async def main():
         app = SessionManagerApp()
-        async with app.run_test(size=(80, 24)) as pilot:
+        async with app.run_test(size=(110, 24)) as pilot:
             await _focus_sessions(app, pilot)
             text = _detail_text(app)
             assert "Demo chat" in text and "~/src/demo" in text
@@ -333,7 +333,7 @@ def test_details_survive_provider_errors(tmp_path, monkeypatch):
 
     async def main():
         app = SessionManagerApp()
-        async with app.run_test(size=(80, 24)) as pilot:
+        async with app.run_test(size=(110, 24)) as pilot:
             table = await _focus_sessions(app, pilot)
             await pilot.press("j")
             await _settle(app, pilot)
@@ -400,7 +400,7 @@ def test_details_scroll_kept_on_rerender_reset_on_new_session(tmp_path, monkeypa
 
     async def main():
         app = SessionManagerApp()
-        async with app.run_test(size=(80, 24)) as pilot:
+        async with app.run_test(size=(110, 24)) as pilot:
             await _focus_sessions(app, pilot)
             await pilot.press("enter")
             await _settle(app, pilot)
@@ -519,7 +519,7 @@ def test_reader_shows_note_when_transcript_unreadable(tmp_path, monkeypatch, err
 
     async def main():
         app = SessionManagerApp()
-        async with app.run_test(size=(80, 24)) as pilot:
+        async with app.run_test(size=(110, 24)) as pilot:
             await _focus_sessions(app, pilot)
             await pilot.press("enter", "enter")
             await pilot.pause()
@@ -545,7 +545,7 @@ def test_reader_worker_error_shows_one_line_note(tmp_path, monkeypatch):
 
     async def main():
         app = SessionManagerApp()
-        async with app.run_test(size=(80, 24)) as pilot:
+        async with app.run_test(size=(110, 24)) as pilot:
             await _focus_sessions(app, pilot)
             await pilot.press("enter", "enter")
             await pilot.pause()

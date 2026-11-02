@@ -51,7 +51,12 @@ from axism.settings import (
     save_settings,
     settings_path,
 )
-from axism.tui.details_view import fmt_size, project_details_text, session_details_text
+from axism.tui.details_view import (
+    fmt_size,
+    project_details_text,
+    session_details_text,
+    tilde,
+)
 from axism.tui.dialogs import (
     AgentPickerScreen,
     ConfirmDeleteScreen,
@@ -167,7 +172,7 @@ class ProjectsLayout:
         if self.show_count:
             widths.append(3)
         if self.show_size:
-            widths.append(5)
+            widths.append(SIZE_WIDTH)
         return widths
 
 
@@ -189,7 +194,7 @@ class SessionsLayout:
         if self.show_updated:
             widths.append(self.updated_width)
         if self.show_size:
-            widths.append(5)
+            widths.append(SIZE_WIDTH)
         if self.show_tags:
             widths.append(self.tags_width)
         return widths
@@ -218,16 +223,36 @@ def _short_path(path: str, max_len: int) -> str:
     # Prefer basename, then …/parent/base, else hard ellipsis.
     base = parts[-1]
     if len(base) <= max_len:
-        if len(parts) == 1:
+        if len(parts) == 1 or len(base) + 2 > max_len:
             return base
-        if len(base) + 2 <= max_len:
-            # Try two-segment tail when it fits.
-            if len(parts) >= 2:
-                two = f"…/{parts[-2]}/{base}"
-                if len(two) <= max_len:
-                    return two
-            return f"…/{base}"
+        # Try two-segment tail when it fits.
+        two = f"…/{parts[-2]}/{base}"
+        if len(two) <= max_len:
+            return two
+        return f"…/{base}"
     return _ellipsis(base if len(base) >= max_len else text, max_len)
+
+
+def _project_label(
+    cwd: str, width: int, *, home: str, glyph: str | None = None
+) -> str:
+    """Project folder for the list: home as ``~``, tail kept, optional agent glyph."""
+    path = tilde(cwd, home)
+    if glyph is None:
+        return _short_path(path, width)
+    return _ellipsis(f"{glyph} {_short_path(path, max(2, width - 2))}", width)
+
+
+def _list_size(n: int) -> str:
+    """Compact size for list columns: one decimal below 10, whole numbers above."""
+    x = float(n)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if x < 1024 or unit == "TB":
+            if unit == "B":
+                return f"{x:.0f}B"
+            return f"{x:.1f}{unit}" if x < 10 else f"{min(x, 9999):.0f}{unit}"
+        x /= 1024
+    raise AssertionError("unreachable")
 
 
 def _agent_glyph(provider: str | None) -> str:
@@ -240,10 +265,16 @@ def _agent_glyph(provider: str | None) -> str:
     }.get(provider or "", "?")
 
 
+# Size column width; ``_list_size`` output always fits it.
+SIZE_WIDTH = 6
 # Every DataTable column adds this much cell padding on top of its content width.
 CELL_PADDING = 2
-# Terminal width below which the detail pane is hidden.
-NARROW_COLUMNS = 70
+# Terminal width below which the detail pane is hidden: under this the three
+# panes are each too thin to use, so the two lists get its room.
+NARROW_COLUMNS = 110
+# Terminal width from which the detail pane takes half the screen: the session
+# columns are already fully readable, and reading gets the extra room.
+WIDE_COLUMNS = 280
 
 
 # The primary column (project name / session title) keeps at least this many
@@ -265,25 +296,25 @@ def plan_projects_layout(budget: int, *, multi_agent: bool) -> ProjectsLayout:
         return budget - sum(fixed) - CELL_PADDING * n_cols
 
     # Sel + Agent + Project + # + Size  (final layout: name takes the rest)
-    if multi_agent and flex([1, 6, 3, 5], 5) >= cap:
+    if multi_agent and flex([1, 6, 3, SIZE_WIDTH], 5) >= cap:
         return ProjectsLayout(
             density="full",
             show_agent_col=True,
             show_count=True,
             show_size=True,
             agent_in_project=False,
-            project_width=flex([1, 6, 3, 5], 5),
+            project_width=flex([1, 6, 3, SIZE_WIDTH], 5),
             agent_width=6,
         )
     # Sel + Project + # + Size  (final layout without an agent column)
-    if not multi_agent and flex([1, 3, 5], 4) >= cap:
+    if not multi_agent and flex([1, 3, SIZE_WIDTH], 4) >= cap:
         return ProjectsLayout(
             density="full",
             show_agent_col=False,
             show_count=True,
             show_size=True,
             agent_in_project=False,
-            project_width=flex([1, 3, 5], 4),
+            project_width=flex([1, 3, SIZE_WIDTH], 4),
         )
     # Sel + Agent + Project + #
     if multi_agent and flex([1, 6, 3], 4) >= cap:
@@ -330,8 +361,8 @@ def plan_sessions_layout(budget: int, *, tags_need: int = 10) -> SessionsLayout:
         return budget - sum(fixed) - CELL_PADDING * n_cols
 
     # Sel + Title + Updated + Size + Tags  (final layout)
-    if flex([1, 11, 5, 10], 5) >= cap:
-        room = flex([1, 11, 5], 5)
+    if flex([1, 11, SIZE_WIDTH, 10], 5) >= cap:
+        room = flex([1, 11, SIZE_WIDTH], 5)
         tags = max(len("Tags"), min(tags_need, room - cap))
         return SessionsLayout(
             density="full",
@@ -343,7 +374,7 @@ def plan_sessions_layout(budget: int, *, tags_need: int = 10) -> SessionsLayout:
             tags_width=tags,
         )
     # Sel + Title + Updated + Size
-    if flex([1, 11, 5], 4) >= cap:
+    if flex([1, 11, SIZE_WIDTH], 4) >= cap:
         return SessionsLayout(
             density="cozy",
             show_updated=True,
@@ -715,17 +746,20 @@ class SessionManagerApp(App[None]):
         background: $boost;
     }
     # Flex panes: projects stays usable on narrow terminals (old 25% got too thin).
+    /* Panes always fill the screen, split by proportion:
+       projects 20% / sessions 40% / details 40%; from 280 columns
+       20% / 30% / 50%; below 110 columns (no details) 33% / 67%. */
     #projects {
-        width: 1fr;
+        width: 2fr;
         min-width: 18;
     }
     #sessions-pane {
-        width: 2fr;
+        width: 4fr;
         min-width: 24;
         layout: vertical;
     }
     #detail {
-        width: 2fr;
+        width: 4fr;
         min-width: 20;
         height: 1fr;
         padding: 0 1;
@@ -734,7 +768,7 @@ class SessionManagerApp(App[None]):
         width: 100%;
         height: auto;
     }
-    /* Below 70 columns: drop the detail pane so projects + sessions both fit. */
+    /* Below 110 columns: drop the detail pane so projects + sessions both fit. */
     .-narrow #detail {
         display: none;
     }
@@ -743,6 +777,12 @@ class SessionManagerApp(App[None]):
     }
     .-narrow #sessions-pane {
         min-width: 16;
+    }
+    .-wide #sessions-pane {
+        width: 3fr;
+    }
+    .-wide #detail {
+        width: 5fr;
     }
     #sessions {
         height: 1fr;
@@ -938,6 +978,7 @@ class SessionManagerApp(App[None]):
 
     def _sync_narrow_class(self) -> None:
         self.set_class(self.size.width < NARROW_COLUMNS, "-narrow")
+        self.set_class(self.size.width >= WIDE_COLUMNS, "-wide")
 
     def _multi_agent(self) -> bool:
         return len(self.providers) > 1
@@ -998,7 +1039,7 @@ class SessionManagerApp(App[None]):
         if layout.show_count:
             table.add_column("#", width=3, key="Sessions")
         if layout.show_size:
-            table.add_column("Size", width=5, key="Size")
+            table.add_column("Size", width=SIZE_WIDTH, key="Size")
         self._projects_layout = layout
 
     def _setup_sessions_columns(self, layout: SessionsLayout | None = None) -> None:
@@ -1012,7 +1053,7 @@ class SessionManagerApp(App[None]):
         if layout.show_updated:
             table.add_column("Updated", width=layout.updated_width, key="Updated")
         if layout.show_size:
-            table.add_column("Size", width=5, key="Size")
+            table.add_column("Size", width=SIZE_WIDTH, key="Size")
         if layout.show_tags:
             table.add_column("Tags", width=layout.tags_width, key="Tags")
         self._sessions_layout = layout
@@ -1140,9 +1181,10 @@ class SessionManagerApp(App[None]):
             if not targets:
                 return False, f"Nothing marked to {verb}"
         elif action_id == "enter_pane":
-            if pane == "sessions" and "detail" not in self._pane_order():
-                return False, "Details are hidden at this width"
-            if pane == "detail" and self._reader_session() is None:
+            reads = pane == "detail" or (
+                pane == "sessions" and "detail" not in self._pane_order()
+            )
+            if reads and self._reader_session() is None:
                 if self.query_one("#detail", DetailPane).subject == "sessions:marked":
                     return False, "Clear marks to read a single session"
                 return False, "Select a session first"
@@ -1232,9 +1274,10 @@ class SessionManagerApp(App[None]):
         pane = self._focus_pane()
         if pane == "projects":
             self._focus_pane_id("sessions")
-        elif pane == "sessions":
+        elif pane == "sessions" and "detail" in self._pane_order():
             self._focus_pane_id("detail")
-        elif pane == "detail":
+        else:
+            # Details pane, or a sessions list with the details pane hidden.
             self._open_reader()
 
     def _reader_session(self) -> SessionMeta | None:
@@ -1670,14 +1713,14 @@ class SessionManagerApp(App[None]):
         self._setup_projects_columns(layout)
         table.clear()
         focus_row = 0
+        home = str(Path.home())
         for i, p in enumerate(self.projects):
-            path_budget = layout.project_width
-            if layout.agent_in_project:
-                path_budget = max(2, layout.project_width - 2)
-            label = _short_path(p.cwd_guess or p.slug, path_budget)
-            if layout.agent_in_project:
-                label = f"{_agent_glyph(p.provider)} {label}"
-                label = _ellipsis(label, layout.project_width)
+            label = _project_label(
+                p.cwd_guess or p.slug,
+                layout.project_width,
+                home=home,
+                glyph=_agent_glyph(p.provider) if layout.agent_in_project else None,
+            )
             mark = MARK_ON if p.key in self.selected_project_slugs else MARK_OFF
             cells: list[str] = [mark]
             if layout.show_agent_col:
@@ -1690,7 +1733,7 @@ class SessionManagerApp(App[None]):
             if layout.show_count:
                 cells.append(str(min(p.session_count, 999)))
             if layout.show_size:
-                cells.append(_ellipsis(_fmt_size(p.total_bytes), 5))
+                cells.append(_list_size(p.total_bytes))
             table.add_row(*map(_cell, cells), key=p.key)
             if keep_key and p.key == keep_key:
                 focus_row = i
@@ -1762,7 +1805,7 @@ class SessionManagerApp(App[None]):
                 else:
                     cells.append(s.mtime_dt.strftime("%m-%d %H:%M"))
             if layout.show_size:
-                cells.append(_ellipsis(_fmt_size(s.size_bytes), 5))
+                cells.append(_list_size(s.size_bytes))
             if layout.show_tags:
                 cells.append(_ellipsis(_column_tags(s, live), layout.tags_width))
             table.add_row(*map(_cell, cells), key=s.key)

@@ -228,7 +228,7 @@ def test_details_pane_scrolls_with_navigation_keys(tmp_path, monkeypatch):
 
     async def main():
         app = SessionManagerApp()
-        async with app.run_test(size=(80, 24)) as pilot:
+        async with app.run_test(size=(110, 24)) as pilot:
             await _start(app, pilot)
             await pilot.press("enter")
             detail = app.query_one("#detail")
@@ -350,8 +350,8 @@ def test_narrow_terminal_skips_the_hidden_details_pane(tmp_path, monkeypatch):
             await pilot.press("l", "l")
             assert app._focus_pane() == "sessions"
             await pilot.press("enter")
-            assert app._focus_pane() == "sessions"
-            assert "hidden" in str(app.query_one("#toast").render())
+            await pilot.pause()
+            assert isinstance(app.screen, ReaderScreen)
 
     _run(main())
 
@@ -406,5 +406,29 @@ def test_app_keys_do_nothing_behind_a_modal(tmp_path, monkeypatch):
             assert len(app.screen_stack) == 1
             assert app.is_running
             assert table.cursor_row == row
+
+    _run(main())
+
+
+@pytest.mark.parametrize(
+    ("size", "shares"),
+    [
+        ((100, 30), (1 / 3, 2 / 3, 0.0)),
+        ((200, 50), (0.2, 0.4, 0.4)),
+        ((420, 60), (0.2, 0.3, 0.5)),
+    ],
+)
+def test_panes_fill_the_screen_by_proportion(tmp_path, monkeypatch, size, shares):
+    _setup(tmp_path, monkeypatch)
+
+    async def main():
+        app = SessionManagerApp()
+        async with app.run_test(size=size) as pilot:
+            await _start(app, pilot)
+            panes = [app.query_one(n) for n in ("#projects", "#sessions-pane", "#detail")]
+            widths = [p.outer_size.width if p.display else 0 for p in panes]
+            assert sum(widths) == size[0]
+            for got, want in zip(widths, shares, strict=True):
+                assert abs(got - want * size[0]) <= 2, (widths, shares)
 
     _run(main())

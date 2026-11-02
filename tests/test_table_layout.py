@@ -11,6 +11,8 @@ from axism.tui.app import (
     _badges,
     _column_tags,
     _ellipsis,
+    _list_size,
+    _project_label,
     _short_path,
     plan_projects_layout,
     plan_sessions_layout,
@@ -133,13 +135,13 @@ def test_tags_column_sizes_to_its_content():
     # 180-column terminal: 68-cell budget, title keeps its 20-cell floor.
     s = plan_sessions_layout(68, tags_need=len("int busy rc sub:3"))
     assert s.show_tags
-    assert s.tags_width == 17 and s.title_width == 24
+    assert s.tags_width == 17 and s.title_width == 23
     # Longer tags than fit: tags take the room down to the title floor.
     s = plan_sessions_layout(68, tags_need=40)
-    assert s.title_width == 20 and s.tags_width == 21
+    assert s.title_width == 20 and s.tags_width == 20
     # Short tags never shrink below the header.
     s = plan_sessions_layout(84, tags_need=1)
-    assert s.tags_width == 4 and s.title_width == 53
+    assert s.tags_width == 4 and s.title_width == 52
 
 
 def test_tags_need_keeps_layout_invariants():
@@ -153,3 +155,29 @@ def test_tags_need_keeps_layout_invariants():
                 assert s.title_width >= 20
             assert s.title_width >= prev, (budget, need, s)
             prev = s.title_width
+
+
+def test_short_path_keeps_a_basename_that_fits():
+    # "…/CarrezOps" needs 11 cells; at 9-10 the bare name still fits.
+    assert _short_path("/home/alice/CarrezOps", 10) == "CarrezOps"
+    assert _short_path("/home/alice/CarrezOps", 9) == "CarrezOps"
+    assert _short_path("/home/alice/CarrezOps", 11) == "…/CarrezOps"
+    assert _short_path("/home/alice/CarrezOps", 7) == "Carrez…"
+
+
+def test_list_size_fits_its_column():
+    assert _list_size(512) == "512B"
+    assert _list_size(int(7.8 * 1024**2)) == "7.8MB"
+    assert _list_size(int(71.1 * 1024**2)) == "71MB"
+    assert _list_size(int(358.5 * 1024)) == "358KB"
+    assert _list_size(int(12.3 * 1024**3)) == "12GB"
+    for n in [0, 1, 999, 1023, 1024, 10**4, 10**6, 1023 * 1024**2, 10**9, 10**12, 10**15]:
+        assert len(_list_size(n)) <= 6, n
+
+
+def test_project_label_shows_home_as_tilde():
+    home = "/home/alice"
+    assert _project_label("/home/alice/CarrezOps", 30, home=home) == "~/CarrezOps"
+    assert _project_label("/srv/data", 30, home=home) == "/srv/data"
+    assert _project_label("/home/alice/CarrezOps", 12, home=home, glyph="A") == "A CarrezOps"
+    assert _project_label("/home/alice/a/b/CarrezOps", 12, home=home) == "…/CarrezOps"

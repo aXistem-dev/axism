@@ -179,7 +179,8 @@ REGISTRY: tuple[KeyAction, ...] = (
     ),
     KeyAction(
         "enter_pane", ("enter",), "Enter",
-        "Go into the highlighted item: projects → sessions → details → reader",
+        "Go into the highlighted item: projects → sessions → details → reader "
+        "(sessions → reader when the details pane is hidden)",
         "Everywhere", _scopes("main"), priority=True,
     ),
     # --- Everywhere: app ------------------------------------------------------
