@@ -22,6 +22,7 @@ from axism.discover import ProjectInfo, SessionMeta
 from axism.fragments import FragmentInventory
 from axism.live import LiveSession
 from axism.move import MoveResult, normalize_dest_cwd
+from axism.paths import is_file_strict
 from axism.providers.base import Capabilities, ProviderBase, UnsupportedOperation
 from axism.providers.common import (
     binary_on_path,
@@ -102,7 +103,7 @@ class OpenCodeProvider(ProviderBase):
             return "database not found"
         if status == "unreadable":
             try:
-                db_found = db_path(root).is_file()
+                db_found = is_file_strict(db_path(root))
             except OSError:
                 db_found = False
             return "database unreadable" if db_found else "data folder unreadable"

@@ -8,6 +8,13 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # pipx installs on the system Python, uv tool on the newest one.
+        python: ["3.12", "3.13", "3.14"]
+    env:
+      UV_PYTHON: ${{ matrix.python }}
     steps:
       - uses: actions/checkout@v4
 
@@ -17,7 +24,7 @@ jobs:
           enable-cache: true
 
       - name: Python
-        run: uv python install 3.12
+        run: uv python install ${{ matrix.python }}
 
       - name: Sync
         run: uv sync --extra dev

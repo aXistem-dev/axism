@@ -14,6 +14,36 @@ UUID_RE = re.compile(
 )
 
 
+# stat errors that mean "nothing there", as Path.exists treated them up to 3.13.
+_ABSENT_ERRNOS = frozenset({errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP})
+
+
+def _stat_or_none(path: Path) -> os.stat_result | None:
+    """``os.stat`` result, ``None`` when absent; other errors (``PermissionError``) raise.
+
+    ``Path.exists``/``is_file``/``is_dir`` return ``False`` for every error from
+    Python 3.14 on, so a locked folder would look empty. These probes keep the
+    error visible on every version.
+    """
+    try:
+        return os.stat(path)
+    except OSError as exc:
+        if exc.errno in _ABSENT_ERRNOS:
+            return None
+        raise
+
+
+def exists_strict(path: Path) -> bool:
+    """``Path.exists`` that raises ``PermissionError`` when it cannot tell."""
+    return _stat_or_none(path) is not None
+
+
+def is_file_strict(path: Path) -> bool:
+    """``Path.is_file`` that raises ``PermissionError`` when it cannot tell."""
+    st = _stat_or_none(path)
+    return st is not None and stat.S_ISREG(st.st_mode)
+
+
 def listable_dir(path: Path) -> bool:
     """Whether ``path`` is a folder whose contents can be listed.
 
@@ -21,11 +51,8 @@ def listable_dir(path: Path) -> bool:
     but cannot be read raises ``PermissionError``, on every Python version
     (``Path.is_dir`` hides that error on newer ones).
     """
-    try:
-        st = os.stat(path)
-    except (FileNotFoundError, NotADirectoryError):
-        return False
-    if not stat.S_ISDIR(st.st_mode):
+    st = _stat_or_none(path)
+    if st is None or not stat.S_ISDIR(st.st_mode):
         return False
     if not os.access(path, os.R_OK | os.X_OK):
         raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(path))

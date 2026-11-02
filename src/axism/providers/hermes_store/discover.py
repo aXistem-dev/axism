@@ -8,6 +8,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from axism.discover import ProjectInfo, SessionMeta
+from axism.paths import is_file_strict
 from axism.providers.hermes_store.paths import DEFAULT_SOURCES, state_db
 
 UNSCOPED_SLUG = "_unscoped"
@@ -77,7 +78,7 @@ def discover_all(
 ) -> list[ProjectInfo]:
     """Interactive sessions grouped by ``git_repo_root`` or ``cwd``."""
     db = state_db(root)
-    if not db.is_file():
+    if not is_file_strict(db):
         return []
     try:
         con = connect(db)
@@ -159,7 +160,7 @@ def discover_all(
 
 def session_exists(root: Path, session_id: str) -> bool:
     db = state_db(root)
-    if not db.is_file():
+    if not is_file_strict(db):
         return False
     try:
         con = connect(db)
@@ -225,7 +226,7 @@ def transcript_turns(root: Path, session_id: str) -> list[tuple[str, str]] | Non
     ``None`` when the database or session cannot be read.
     """
     db = state_db(root)
-    if not db.is_file():
+    if not is_file_strict(db):
         return None
     try:
         con = connect(db)

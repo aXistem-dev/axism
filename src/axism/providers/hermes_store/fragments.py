@@ -5,13 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from axism.fragments import Fragment, FragmentInventory, is_safe_id
-from axism.paths import path_size
+from axism.paths import is_file_strict, path_size
 from axism.providers.hermes_store.discover import connect
 from axism.providers.hermes_store.paths import legacy_session_files, state_db
 
 
 def _message_bytes(db: Path, session_id: str) -> int:
-    if not db.is_file():
+    if not is_file_strict(db):
         return 0
     try:
         con = connect(db)
@@ -37,7 +37,7 @@ def collect_fragments(
     """Database rows (protected, removed via the CLI) plus legacy JSON files."""
     inv = FragmentInventory(session_id=session_id, project_slug=project_slug)
     db = state_db(root)
-    if db.is_file():
+    if is_file_strict(db):
         # state.db is in PROTECTED_NAMES: shown for size, never unlinked.
         inv.fragments.append(
             Fragment(

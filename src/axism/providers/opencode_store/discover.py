@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from axism.discover import ProjectInfo, SessionMeta
+from axism.paths import exists_strict, is_file_strict
 from axism.providers.opencode_store.paths import db_path
 
 REQUIRED_COLUMNS: dict[str, set[str]] = {
@@ -44,9 +45,9 @@ def layout_status(root: Path) -> str:
     ``unsupported`` (not an OpenCode 2 database), or ``ok``."""
     db = db_path(root)
     try:
-        if not db.is_file():
+        if not is_file_strict(db):
             # Absent only if the folder can be read; otherwise we cannot tell.
-            readable = os.access(root, os.R_OK | os.X_OK) or not root.exists()
+            readable = os.access(root, os.R_OK | os.X_OK) or not exists_strict(root)
             return "missing" if readable else "unreadable"
         if not os.access(db, os.R_OK):
             return "unreadable"

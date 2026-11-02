@@ -36,3 +36,35 @@ def test_config_root_override(monkeypatch, tmp_path: Path):
     from axism.paths import config_root
 
     assert config_root() == tmp_path.resolve()
+
+
+def test_strict_probes_report_absence_and_surface_locked_folders(tmp_path: Path):
+    import os
+
+    import pytest
+
+    from axism.paths import exists_strict, is_file_strict
+
+    f = tmp_path / "state.db"
+    f.write_text("x", encoding="utf-8")
+    assert is_file_strict(f) and exists_strict(f)
+    assert not is_file_strict(tmp_path) and exists_strict(tmp_path)
+    assert not is_file_strict(tmp_path / "nope") and not exists_strict(tmp_path / "nope")
+    # A path below a file is absent, not an error.
+    assert not exists_strict(f / "child")
+
+    gate = tmp_path / "gate"
+    inner = gate / "inner"
+    inner.mkdir(parents=True)
+    (inner / "state.db").write_text("x", encoding="utf-8")
+    gate.chmod(0)
+    try:
+        if os.access(gate, os.R_OK | os.X_OK):
+            pytest.skip("permissions are not enforced here (running as root)")
+        # Python 3.14's Path.exists/is_file return False here; these raise on every version.
+        with pytest.raises(PermissionError):
+            exists_strict(inner)
+        with pytest.raises(PermissionError):
+            is_file_strict(inner / "state.db")
+    finally:
+        gate.chmod(0o755)
