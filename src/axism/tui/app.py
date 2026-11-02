@@ -317,10 +317,12 @@ def plan_projects_layout(budget: int, *, multi_agent: bool) -> ProjectsLayout:
     )
 
 
-def plan_sessions_layout(budget: int) -> SessionsLayout:
+def plan_sessions_layout(budget: int, *, tags_need: int = 10) -> SessionsLayout:
     """Choose sessions columns that fit in ``budget`` cells (no h-scroll).
 
     The budget covers content widths plus ``CELL_PADDING`` per visible column.
+    ``tags_need`` is the longest tag text in the list: the Tags column grows to
+    it, taking room from the title down to ``MIN_SESSION_TITLE``.
     """
     cap = MIN_SESSION_TITLE
 
@@ -329,14 +331,16 @@ def plan_sessions_layout(budget: int) -> SessionsLayout:
 
     # Sel + Title + Updated + Size + Tags  (final layout)
     if flex([1, 11, 5, 10], 5) >= cap:
+        room = flex([1, 11, 5], 5)
+        tags = max(len("Tags"), min(tags_need, room - cap))
         return SessionsLayout(
             density="full",
             show_updated=True,
             show_size=True,
             show_tags=True,
-            title_width=flex([1, 11, 5, 10], 5),
+            title_width=room - tags,
             updated_width=11,
-            tags_width=10,
+            tags_width=tags,
         )
     # Sel + Title + Updated + Size
     if flex([1, 11, 5], 4) >= cap:
@@ -424,6 +428,27 @@ def _badges(sess: SessionMeta, live: LiveSession | None) -> str:
         tags.append("remote")
     if sess.subagent_count:
         tags.append(f"subagents:{sess.subagent_count}")
+    return " ".join(tags) if tags else "-"
+
+
+def _column_tags(sess: SessionMeta, live: LiveSession | None) -> str:
+    """Short tags for the sessions list, so they fit next to the title."""
+    tags: list[str] = []
+    if live:
+        if live.kind == "background":
+            tags.append("bg")
+        elif live.kind == "interactive":
+            tags.append("int")
+        if live.state:
+            tags.append(str(live.state))
+        elif live.is_live:
+            tags.append("live")
+        if live.is_remote or sess.has_bridge:
+            tags.append("rc")
+    elif sess.has_bridge:
+        tags.append("rc")
+    if sess.subagent_count:
+        tags.append(f"sub:{sess.subagent_count}")
     return " ".join(tags) if tags else "-"
 
 
@@ -951,7 +976,14 @@ class SessionManagerApp(App[None]):
 
     def _compute_sessions_layout(self) -> SessionsLayout:
         table = self.query_one("#sessions", DataTable)
-        return plan_sessions_layout(self._table_budget(table, 40))
+        need = max(
+            (
+                len(_column_tags(s, live_for_session(self.live, s)))
+                for s in self._visible_sessions()
+            ),
+            default=0,
+        )
+        return plan_sessions_layout(self._table_budget(table, 40), tags_need=need)
 
     def _setup_projects_columns(self, layout: ProjectsLayout | None = None) -> None:
         table = self.query_one("#projects", DataTable)
@@ -1366,6 +1398,7 @@ class SessionManagerApp(App[None]):
                         s.session_id,
                         s.cwd or "",
                         _badges(s, live),
+                        _column_tags(s, live),
                     ]
                 ).lower()
                 if q in hay:
@@ -1731,7 +1764,7 @@ class SessionManagerApp(App[None]):
             if layout.show_size:
                 cells.append(_ellipsis(_fmt_size(s.size_bytes), 5))
             if layout.show_tags:
-                cells.append(_ellipsis(_badges(s, live), layout.tags_width))
+                cells.append(_ellipsis(_column_tags(s, live), layout.tags_width))
             table.add_row(*map(_cell, cells), key=s.key)
             if keep_id and (s.key == keep_id or s.session_id == keep_id):
                 focus_row = i

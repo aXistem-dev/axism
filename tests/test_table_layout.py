@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from axism.discover import SessionMeta
+from axism.live import LiveSession
 from axism.tui.app import (
     _agent_glyph,
+    _badges,
+    _column_tags,
     _ellipsis,
     _short_path,
     plan_projects_layout,
@@ -92,3 +98,58 @@ def test_optional_columns_need_a_roomy_primary_column():
     first_full = next(i for i, x in enumerate(mid) if x.show_updated and x.updated_width == 11)
     first_compact = next(i for i, x in enumerate(mid) if x.show_updated)
     assert first_compact < first_full
+
+
+def _sess(subagents: int = 0, bridge: bool = False) -> SessionMeta:
+    return SessionMeta(
+        session_id="s1",
+        project_slug="p",
+        cwd="/w/p",
+        title="t",
+        first_prompt=None,
+        transcript_path=Path("/w/p/s1.jsonl"),
+        mtime=0.0,
+        size_bytes=0,
+        subagent_count=subagents,
+        has_bridge=bridge,
+    )
+
+
+def test_column_tags_are_short_and_complete():
+    live = LiveSession(session_id="s1", kind="interactive", state="busy", pid=1)
+    sess = _sess(subagents=3, bridge=True)
+    assert _badges(sess, live) == "interactive live remote busy subagents:3"
+    assert _column_tags(sess, live) == "int busy rc sub:3"
+    # "live" stays when no state says more.
+    bare = LiveSession(session_id="s1", kind="interactive", state=None, pid=1)
+    assert _column_tags(_sess(), bare) == "int live"
+    bg = LiveSession(session_id="s1", kind="background", state="working")
+    assert _column_tags(_sess(), bg) == "bg working"
+    assert _column_tags(_sess(bridge=True), None) == "rc"
+    assert _column_tags(_sess(), None) == "-"
+
+
+def test_tags_column_sizes_to_its_content():
+    # 180-column terminal: 68-cell budget, title keeps its 20-cell floor.
+    s = plan_sessions_layout(68, tags_need=len("int busy rc sub:3"))
+    assert s.show_tags
+    assert s.tags_width == 17 and s.title_width == 24
+    # Longer tags than fit: tags take the room down to the title floor.
+    s = plan_sessions_layout(68, tags_need=40)
+    assert s.title_width == 20 and s.tags_width == 21
+    # Short tags never shrink below the header.
+    s = plan_sessions_layout(84, tags_need=1)
+    assert s.tags_width == 4 and s.title_width == 53
+
+
+def test_tags_need_keeps_layout_invariants():
+    for need in (1, 10, 17, 40):
+        prev = 0
+        for budget in range(10, 201):
+            s = plan_sessions_layout(budget, tags_need=need)
+            widths = s.column_widths()
+            assert sum(widths) + 2 * len(widths) <= budget, (budget, need, s)
+            if s.show_updated:
+                assert s.title_width >= 20
+            assert s.title_width >= prev, (budget, need, s)
+            prev = s.title_width
