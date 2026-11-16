@@ -15,6 +15,5 @@ htmlcov/
 .DS_Store
 uv.lock
 
-# Work-in-progress branding assets, not ready to commit yet
-aXism-DARKFAVICON-NeedTransparentFix.png
-aXism-LIGHTFAVICON-NeedTransparentFix.png
+# Original branding exports (the committed aXism-*.png files are the cleaned versions)
+*-NeedTransparentFix.png
